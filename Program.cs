@@ -2,108 +2,131 @@
 using System.Text.Json;
 using Telegram.Bot;
 using Telegram.Bot.Polling;
+using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 
 class Program
 {
-    static string groqKey = Environment.GetEnvironmentVariable("GROQ_KEY") ?? "";
     static string telegramToken = Environment.GetEnvironmentVariable("TELEGRAM_TOKEN") ?? "";
+    static string groqKey = Environment.GetEnvironmentVariable("GROQ_KEY") ?? "";
     static HttpClient http = new HttpClient();
-
-    static async Task<string> PreguntarAI(string mensajeUsuario)
-    {
-        try
-        {
-            var url = "https://api.groq.com/openai/v1/chat/completions";
-
-            var body = new
-            {
-                model = "openai/gpt-oss-20b",
-                messages = new[]
-                {
-                    new { role = "system", content = "Eres ESPACIONITRO, un amigo calido, divertido y empatico para jovenes en Chile. Hablas como un amigo chileno buena onda, usas emojis, eres corto, no juzgas, escuchas." },
-                    new { role = "user", content = mensajeUsuario }
-                },
-                temperature = 0.8,
-                max_tokens = 300
-            };
-
-            var json = JsonSerializer.Serialize(body);
-            var req = new HttpRequestMessage(HttpMethod.Post, url);
-            req.Headers.Add("Authorization", $"Bearer {groqKey}");
-            req.Content = new StringContent(json, Encoding.UTF8, "application/json");
-
-            var res = await http.SendAsync(req);
-            var resTexto = await res.Content.ReadAsStringAsync();
-            Console.WriteLine("RESPUESTA GROQ: " + resTexto);
-
-            using var doc = JsonDocument.Parse(resTexto);
-            return doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "No te entendi, repiteme?";
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine("Error Groq: " + ex.Message);
-            return "Uyy, se me fue el internet cosmico un segundo, me lo repites? 😅";
-        }
-    }
 
     static async Task Main()
     {
-        // Para que funcione en tu PC tambien, si no hay variables, usa las de aqui para probar
-        if (string.IsNullOrEmpty(telegramToken))
+        if (string.IsNullOrWhiteSpace(telegramToken))
         {
-            Console.WriteLine("Falta TELEGRAM_TOKEN. Ponlo en variables de entorno o aqui para probar local.");
+            Console.WriteLine("Falta TELEGRAM_TOKEN. Ponlo en variables de entorno");
             return;
         }
 
-        var bot = new TelegramBotClient(telegramToken);
-        var me = await bot.GetMe();
-        Console.WriteLine($"ESPACIONITRO encendido! Soy @{me.Username}");
-        var cts = new CancellationTokenSource();
-
-        // Mantiene vivo a Render
+        // TRUCO PARA RENDER GRATIS: abrir puerto para que Render no lo apague
+        var port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
         _ = Task.Run(async () =>
         {
             try
             {
-                var port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
                 var listener = new System.Net.HttpListener();
                 listener.Prefixes.Add($"http://*:{port}/");
                 listener.Start();
-                Console.WriteLine($"Servidor web vivo en puerto {port}");
+                Console.WriteLine($"Puerto web abierto en {port}");
                 while (true)
                 {
                     var ctx = await listener.GetContextAsync();
-                    var buf = Encoding.UTF8.GetBytes("ESPACIONITRO esta vivo 🚀");
-                    ctx.Response.OutputStream.Write(buf, 0, buf.Length);
+                    var bytes = Encoding.UTF8.GetBytes("Bot ESPACIONITRO activo");
+                    ctx.Response.OutputStream.Write(bytes, 0, bytes.Length);
                     ctx.Response.Close();
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Error servidor web: " + ex.Message);
+                Console.WriteLine("Error puerto: " + ex.Message);
             }
         });
 
+        var bot = new TelegramBotClient(telegramToken);
+        var me = await bot.GetMe();
+        Console.WriteLine($"Bot conectado: @{me.Username}");
+
+        var cts = new CancellationTokenSource();
+        var receiverOptions = new ReceiverOptions { AllowedUpdates = Array.Empty<UpdateType>() };
+
         bot.StartReceiving(
-            async (botClient, update, ct) =>
-            {
-                if (update.Message?.Text == null) return;
-                var chatId = update.Message.Chat.Id;
-                var texto = update.Message.Text;
-                Console.WriteLine($"Usuario: {texto}");
-                string respuesta = texto == "/start"
-                    ? "Holaa! Soy ESPACIONITRO 🚀 Ahora tengo cerebro super rapido. Preguntame lo que quieras. Como estas hoy?"
-                    : await PreguntarAI(texto);
-                await botClient.SendMessage(chatId, respuesta, cancellationToken: ct);
-            },
-            async (botClient, ex, ct) => { Console.WriteLine(ex.Message); },
-            new ReceiverOptions { AllowedUpdates = new[] { UpdateType.Message } },
-            cancellationToken: cts.Token
+            HandleUpdateAsync,
+            HandleErrorAsync,
+            receiverOptions,
+            cts.Token
         );
 
-        Console.WriteLine("Pulsa ENTER para apagar...");
-        Console.ReadLine();
-        cts.Cancel();
+        Console.WriteLine("Bot ESPACIONITRO prendido, esperando mensajes...");
+        await Task.Delay(-1);
+    }
+
+    static async Task HandleUpdateAsync(ITelegramBotClient bot, Update update, CancellationToken ct)
+    {
+        if (update.Message is not { } message) return;
+        if (message.Text is not { } text) return;
+
+        Console.WriteLine($"Mensaje de {message.Chat.Id}: {text}");
+
+        try
+        {
+            string respuesta;
+
+            if (text == "/start")
+            {
+                respuesta = "Hola! Soy ESPACIONITRO 🚀\nEscríbeme lo que quieras y te respondo con IA.";
+            }
+            else
+            {
+                respuesta = await PreguntarGroq(text);
+            }
+
+            await bot.SendMessage(message.Chat.Id, respuesta, cancellationToken: ct);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Error: " + ex.Message);
+            await bot.SendMessage(message.Chat.Id, "Hubo un error, intenta de nuevo.", cancellationToken: ct);
+        }
+    }
+
+    static async Task<string> PreguntarGroq(string pregunta)
+    {
+        try
+        {
+            var body = new
+            {
+                model = "llama-3.3-70b-versatile",
+                messages = new[]
+                {
+                    new { role = "system", content = "Eres ESPACIONITRO, un asistente amigable y divertido que responde en español chileno, corto y buena onda." },
+                    new { role = "user", content = pregunta }
+                }
+            };
+
+            var req = new HttpRequestMessage(HttpMethod.Post, "https://api.groq.com/openai/v1/chat/completions");
+            req.Headers.Add("Authorization", $"Bearer {groqKey}");
+            req.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+
+            var res = await http.SendAsync(req);
+            var json = await res.Content.ReadAsStringAsync();
+
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement
+                .GetProperty("choices")[0]
+                .GetProperty("message")
+                .GetProperty("content")
+                .GetString() ?? "No pude responder.";
+        }
+        catch (Exception ex)
+        {
+            return "Error con Groq: " + ex.Message;
+        }
+    }
+
+    static Task HandleErrorAsync(ITelegramBotClient bot, Exception ex, CancellationToken ct)
+    {
+        Console.WriteLine("Error Telegram: " + ex.Message);
+        return Task.CompletedTask;
     }
 }
