@@ -96,7 +96,7 @@ class Program
     {
         var body = new
         {
-            model = "llama-3.1-8b-instant",
+            model = "openai/gpt-oss-20b",
             messages = new[]
             {
                 new { role = "system", content = "Eres ESPACIONITRO, un asistente amigable y divertido que responde en español chileno, corto y buena onda." },
