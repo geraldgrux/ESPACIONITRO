@@ -91,38 +91,46 @@ class Program
     }
 
     static async Task<string> PreguntarGroq(string pregunta)
+{
+    try
     {
-        try
+        var body = new
         {
-            var body = new
+            model = "llama-3.1-8b-instant",
+            messages = new[]
             {
-                model = "llama-3.3-70b-versatile",
-                messages = new[]
-                {
-                    new { role = "system", content = "Eres ESPACIONITRO, un asistente amigable y divertido que responde en español chileno, corto y buena onda." },
-                    new { role = "user", content = pregunta }
-                }
-            };
+                new { role = "system", content = "Eres ESPACIONITRO, un asistente amigable y divertido que responde en español chileno, corto y buena onda." },
+                new { role = "user", content = pregunta }
+            }
+        };
 
-            var req = new HttpRequestMessage(HttpMethod.Post, "https://api.groq.com/openai/v1/chat/completions");
-            req.Headers.Add("Authorization", $"Bearer {groqKey}");
-            req.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+        var req = new HttpRequestMessage(HttpMethod.Post, "https://api.groq.com/openai/v1/chat/completions");
+        req.Headers.Add("Authorization", $"Bearer {groqKey}");
+        req.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
 
-            var res = await http.SendAsync(req);
-            var json = await res.Content.ReadAsStringAsync();
+        var res = await http.SendAsync(req);
+        var json = await res.Content.ReadAsStringAsync();
+        Console.WriteLine("Respuesta Groq: " + json);
 
-            using var doc = JsonDocument.Parse(json);
-            return doc.RootElement
-                .GetProperty("choices")[0]
-                .GetProperty("message")
-                .GetProperty("content")
-                .GetString() ?? "No pude responder.";
-        }
-        catch (Exception ex)
+        using var doc = JsonDocument.Parse(json);
+
+        // Si Groq devuelve error, mostrarlo
+        if (doc.RootElement.TryGetProperty("error", out var errorProp))
         {
-            return "Error con Groq: " + ex.Message;
+            return "Error de Groq: " + errorProp.GetProperty("message").GetString();
         }
+
+        return doc.RootElement
+            .GetProperty("choices")[0]
+            .GetProperty("message")
+            .GetProperty("content")
+            .GetString() ?? "No pude responder.";
     }
+    catch (Exception ex)
+    {
+        return "Error con Groq: " + ex.Message;
+    }
+}
 
     static Task HandleErrorAsync(ITelegramBotClient bot, Exception ex, CancellationToken ct)
     {
