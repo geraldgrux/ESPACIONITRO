@@ -8,7 +8,6 @@ using System.Text.Json;
 // --- Variables de Render ---
 var telegramToken = Environment.GetEnvironmentVariable("TELEGRAM_TOKEN") ?? "";
 var groqKey = Environment.GetEnvironmentVariable("GROQ_KEY") ?? "";
-var port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
 
 if (string.IsNullOrEmpty(telegramToken))
 {
@@ -20,12 +19,6 @@ if (string.IsNullOrEmpty(groqKey))
 {
     Console.WriteLine("ERROR: Falta GROQ_KEY en Render");
 }
-
-// --- Servidor web para que Render no se duerma ---
-var builder = WebApplication.CreateBuilder(args);
-var app = builder.Build();
-app.MapGet("/", () => "ESPACIONITRO esta vivo! 🚀");
-_ = app.RunAsync($"http://*:{port}");
 
 // --- Bot de Telegram ---
 var bot = new TelegramBotClient(telegramToken);
@@ -84,7 +77,7 @@ async Task<string> PreguntarGroq(string preguntaUsuario)
             model = "openai/gpt-oss-20b",
             messages = new[]
             {
-                new { role = "system", content = "Eres ESPACIONITRO, un asistente de buenas vibras en español chileno. Respondes divertido, con humor chileno, buena onda, usas palabras como po, cachai, órale, qué raja. Nunca usas ** ni negritas ni markdown, solo texto plano." },
+                new { role = "system", content = "Eres ESPACIONITRO, un asistente de buenas vibras en español chileno. Respondes divertido, con humor chileno, buena onda, usas palabras como po, cachai, que raja. Nunca usas ** ni negritas ni markdown, solo texto plano." },
                 new { role = "user", content = preguntaUsuario }
             },
             temperature = 0.8,
