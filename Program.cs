@@ -48,7 +48,6 @@ while (true)
             var respuesta = await ResponderConGroq(texto);
             if (string.IsNullOrWhiteSpace(respuesta)) respuesta = "Estoy con problemas para traer los datos en vivo ahora, prueba de nuevo en un momento.";
 
-            // FIX CORTE TELEGRAM: partir en trozos de 3800 y mandar en orden, no truncar
             var trozos = new List<string>();
             for (int i = 0; i < respuesta.Length; i += 3800)
             {
@@ -210,43 +209,23 @@ async Task<string> ResponderConGroq(string texto)
         {
             var datosArq = await ObtenerNoticiasArquitectura();
             Console.WriteLine($"DATOS ARQ: {datosArq}");
-            systemPrompt = $"Eres EspacioNitro, asistente de arquitectura en Chile. Eres arquitecto chileno con experiencia en OGUC, LGUC, MINVU y DOM. Responde corto, claro, en español chileno, con criterio profesional. REGLA: Solo usa las noticias reales de abajo. No inventes concursos ni cambios de norma. Si no hay noticia, dilo. DATOS:\n{datosArq}";
+            systemPrompt = $"Eres EspacioNitro, arquitecto chileno. Responde corto, en español chileno. Solo usa las noticias reales de abajo. No inventes concursos ni cambios de norma. DATOS:\n{datosArq}";
         }
         else if (esNormativa)
         {
-            systemPrompt = @"Eres EspacioNitro, arquitecto chileno experto en OGUC, LGUC y trámites DOM en Chile.
-GLOSARIO OBLIGATORIO, NO LO CAMBIES:
-- OGUC = Ordenanza General de Urbanismo y Construcciones, Decreto Supremo N°47 del MINVU, norma NACIONAL.
-- LGUC = Ley General de Urbanismo y Construcciones.
-- DOM = Dirección de Obras Municipales.
-- PRC = Plan Regulador Comunal, es lo que define cada comuna.
-- CIP = Certificado de Informaciones Previas, es el primer documento que se pide en la DOM.
-- EETT = Especificaciones Técnicas, nunca Estudio de Efectos.
-- Permiso de Edificación se tramita en la DOM de la comuna, no en MINVU.
-PROHIBIDO USAR: POT, PDU, Plan de Ordenamiento Territorial, o decir que OGUC es municipal. PROHIBIDO decir fontanería, usa instalaciones sanitarias / agua potable y alcantarillado.
-REGLA: Nunca inventes número de artículo, plazo o documento. Si no estás seguro, di 'verifica en OGUC / CIP / DOM'.
-Para Permiso de Edificación en Chile, la estructura siempre es: 1. Pedir CIP en DOM, 2. Revisar PRC (uso de suelo, altura, ocupación, antejardín), 3. Proyecto de arquitectura + estructura + instalaciones, 4. Expediente: solicitud, planos, memoria, EETT (Especificaciones Técnicas), cálculo, certificados, patente del arquitecto, 5. Ingreso DOM, observaciones, 6. Aprobación y pago de derechos.
-Termina siempre con: 'Verifica con CIP y DOM de tu comuna, esto es orientación, no reemplaza la norma'.";
+            systemPrompt = @"Eres EspacioNitro, arquitecto chileno experto OGUC, LGUC y DOM.
+OGUC = Ordenanza General de Urbanismo y Construcciones DS 47 MINVU, norma NACIONAL. LGUC = Ley General de Urbanismo y Construcciones. DOM = Dirección de Obras Municipales. PRC = Plan Regulador Comunal. CIP = Certificado de Informaciones Previas, primer documento en DOM. EETT = Especificaciones Técnicas.
+PROHIBIDO: POT, PDU, decir OGUC municipal, decir fontanería (usa instalaciones sanitarias).
+Nunca inventes artículo, plazo o documento. Si no estás seguro, di 'verifica en OGUC / CIP / DOM'.
+Permiso: 1. CIP en DOM, 2. Revisar PRC, 3. Proyecto arquitectura + estructura + instalaciones, 4. Expediente: solicitud, planos, memoria, EETT, cálculo, certificados, patente, 5. Ingreso DOM, 6. Aprobación y pago derechos.
+Termina con: 'Verifica con CIP y DOM de tu comuna, esto es orientación, no reemplaza la norma'.";
         }
         else if (esTrabajo)
         {
-            systemPrompt = @"Eres EspacioNitro, arquitecto chileno. Ayudas a redactar memoria, carta DOM, expediente, checklist, EETT.
-GLOSARIO OBLIGATORIO:
-- OGUC = Ordenanza General de Urbanismo y Construcciones DS 47.
-- LGUC = Ley General de Urbanismo y Construcciones.
-- DOM = Dirección de Obras Municipales.
-- PRC = Plan Regulador Comunal.
-- CIP = Certificado de Informaciones Previas.
-- EETT = Especificaciones Técnicas.
-PROHIBIDO: decir que LGUC es Ley de Garantía, que DOM son ordenanzas, que NCh 4 es estructural, o usar POT/PDU. PROHIBIDO decir fontanería, usa instalaciones sanitarias.
-REGLA DE ORO: Distingue 2 cosas.
-1. DATO DE SITIO / CIP / PRC: altura, ocupación, densidad, antejardín, metros terreno, dirección, topografía. Eso NUNCA lo inventes. Pon [COMPLETAR: según CIP].
-2. CRITERIO DE DISEÑO: estructura, instalaciones, habitabilidad. Eso SÍ proponlo como PROPUESTA A VALIDAR, no lo dejes en [COMPLETAR]. Ejemplo: 'Propuesta: estructura en albañilería armada + losa hormigón, a validar con cálculo' / 'Propuesta: agua caliente con calefón + panel solar, a validar' / 'Propuesta: ventilación cruzada + doble vidriado, a validar'.
-PROHIBIDO dejar los puntos 5, 6 y 7 solo con [COMPLETAR]. Siempre da 2-3 viñetas de propuesta concreta.
-Para memoria: usa estructura chilena real: 1. Datos proyecto y propietario, 2. Antecedentes CIP/PRC, 3. Emplazamiento, 4. Programa arquitectónico y superficies (útil, construida), 5. Criterio estructural, 6. Criterio instalaciones, 7. Criterio eficiencia / habitabilidad OGUC Título 4, 8. Cumplimiento normativo.
-REGLA DE FORMATO CLAVE: Máximo 750 palabras en total. Cada punto máximo 3 viñetas cortas. Nunca uses tablas gigantes. Usa listas cortas con guiones. La memoria debe entregarse COMPLETA, del punto 1 al 8, sin cortar en el punto 6. Sé conciso para que quepa completa.
-Para checklist de permiso: usa lista real DOM: Solicitud, CIP, planos arquitectura 1:50, planos estructura, memoria de cálculo, EETT, certificado de factibilidad agua/luz, patente profesional, certificado de dominio vigente.
-Si falta un dato clave de sitio, pon [COMPLETAR: ...] y sigue. No inventes superficies, ni materiales, ni cálculos como si fueran definitivos, preséntalos como propuesta a validar.";
+            systemPrompt = @"Eres EspacioNitro, arquitecto chileno. Redacta memoria, carta DOM, checklist, EETT.
+OGUC = Ordenanza General DS 47. LGUC = Ley General Urbanismo. DOM = Dirección Obras Municipales. PRC = Plan Regulador Comunal. CIP = Certificado Informaciones Previas. EETT = Especificaciones Técnicas. PROHIBIDO POT/PDU, PROHIBIDO fontanería, usa instalaciones sanitarias.
+REGLA: 1) DATO SITIO (altura, ocupación, densidad, antejardín, terreno, dirección, topografía): NUNCA inventes, pon [COMPLETAR: según CIP]. 2) CRITERIO DISEÑO (estructura, instalaciones, habitabilidad): SÍ proponlo como PROPUESTA A VALIDAR, nunca lo dejes solo en [COMPLETAR]. Ej: 'Propuesta: albañilería armada + losa hormigón, a validar con cálculo'.
+Memoria 1-8: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa y superficies, 5 Estructural, 6 Instalaciones, 7 Eficiencia / habitabilidad OGUC Título 4, 8 Cumplimiento. Máximo 750 palabras, máximo 3 viñetas por punto, sin tablas gigantes, completa del 1 al 8.";
         }
         else if (esSantiago)
         {
@@ -256,64 +235,83 @@ Si falta un dato clave de sitio, pon [COMPLETAR: ...] y sigue. No inventes super
             {
                 return "No pude traer los datos en vivo justo ahora (las fuentes están con límite), prueba de nuevo en 2 minutos.";
             }
-            systemPrompt = $"Eres EspacioNitro, bot de Telegram en Chile. Responde corto, claro y en español chileno. REGLA: Solo usa DATOS REALES de abajo. No inventes Metro ni tráfico. Si un dato no está, di 'no hay info confirmada'. DATOS:\n{datos}";
+            systemPrompt = $"Eres EspacioNitro, bot Telegram Chile. Responde corto, español chileno. Solo usa DATOS REALES de abajo. No inventes Metro ni tráfico. DATOS:\n{datos}";
         }
         else
         {
-            systemPrompt = "Eres EspacioNitro, asistente de arquitectura en Chile y bot de Telegram. Responde corto, claro y en español chileno. Eres amable, profesional, con criterio de arquitecto chileno. Nunca uses POT/PDU, OGUC es nacional DS 47, LGUC es Ley General de Urbanismo y Construcciones, DOM es Dirección de Obras Municipales, EETT son Especificaciones Técnicas.";
+            systemPrompt = "Eres EspacioNitro, arquitecto chileno, bot Telegram. Responde corto, español chileno. OGUC nacional DS 47, LGUC Ley General Urbanismo, DOM Dirección Obras Municipales, EETT Especificaciones Técnicas. Nunca POT/PDU.";
         }
 
         using var groq = new HttpClient();
         groq.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", groqKey);
 
-        for (int intento = 0; intento < 2; intento++)
+        // FIX BUG VACIO: gpt-oss se comía los tokens razonando. Ahora reasoning low + respaldo llama.
+        var intentos = new[]
         {
-            var promptAUsar = intento == 0 ? systemPrompt : systemPrompt + "\nResponde en máximo 700 palabras, con listas cortas, completa del 1 al 8 sin cortar.";
-            var tokensAUsar = intento == 0 ? 2500 : 1200;
+            new { Modelo = "openai/gpt-oss-20b", Reasoning = "low", Tokens = 3000 },
+            new { Modelo = "openai/gpt-oss-20b", Reasoning = "low", Tokens = 2000 },
+            new { Modelo = "llama-3.3-70b-versatile", Reasoning = "", Tokens = 2000 },
+        };
 
-            var payload = new
-            {
-                model = "openai/gpt-oss-20b",
-                messages = new[]
-                {
-                    new { role = "system", content = promptAUsar },
-                    new { role = "user", content = texto }
-                },
-                temperature = 0.2,
-                max_tokens = tokensAUsar
-            };
-
-            var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-            var res = await groq.PostAsync("https://api.groq.com/openai/v1/chat/completions", content);
-            var json = await res.Content.ReadAsStringAsync();
-            Console.WriteLine($"GROQ intento {intento}: {res.StatusCode} len={json.Length}");
-
+        foreach (var it in intentos)
+        {
             try
             {
+                object payload;
+                if (string.IsNullOrEmpty(it.Reasoning))
+                {
+                    payload = new
+                    {
+                        model = it.Modelo,
+                        messages = new[]
+                        {
+                            new { role = "system", content = systemPrompt },
+                            new { role = "user", content = texto }
+                        },
+                        temperature = 0.2,
+                        max_tokens = it.Tokens
+                    };
+                }
+                else
+                {
+                    payload = new
+                    {
+                        model = it.Modelo,
+                        messages = new[]
+                        {
+                            new { role = "system", content = systemPrompt },
+                            new { role = "user", content = texto }
+                        },
+                        temperature = 0.2,
+                        max_completion_tokens = it.Tokens,
+                        reasoning_effort = it.Reasoning
+                    };
+                }
+
+                var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+                var res = await groq.PostAsync("https://api.groq.com/openai/v1/chat/completions", content);
+                var json = await res.Content.ReadAsStringAsync();
+                Console.WriteLine($"GROQ {it.Modelo} {it.Reasoning}: {res.StatusCode} len={json.Length}");
+
                 using var doc = JsonDocument.Parse(json);
                 if (!doc.RootElement.TryGetProperty("choices", out var choices)) continue;
                 var msg = choices[0].GetProperty("message");
                 string? resp = null;
                 if (msg.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.String)
                     resp = c.GetString();
-
                 if (string.IsNullOrWhiteSpace(resp) && msg.TryGetProperty("reasoning_content", out var rc) && rc.ValueKind == JsonValueKind.String)
                     resp = rc.GetString();
 
-                if (!string.IsNullOrWhiteSpace(resp))
-                {
-                    return resp;
-                }
-
-                Console.WriteLine($"GROQ VACIO intento {intento}, reintentando...");
+                if (!string.IsNullOrWhiteSpace(resp)) return resp;
+                Console.WriteLine($"GROQ VACIO {it.Modelo}, probando siguiente...");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"PARSE GROQ FALLO: {ex.Message} json={json.Substring(0, Math.Min(500, json.Length))}");
+                Console.WriteLine($"GROQ FALLO {it.Modelo}: {ex.Message}");
             }
         }
 
-        return "No pude armar la respuesta, prueba de nuevo con una versión más corta, por ejemplo: 'Memoria casa 120 m2 Ñuñoa, resumen'.";
+        return "No pude armar la respuesta, prueba de nuevo en 1 minuto. Si sigue, prueba: 'Memoria casa 120 m2 Ñuñoa, resumen'.";
     }
     catch (Exception ex)
     {
