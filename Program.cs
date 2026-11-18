@@ -10,7 +10,6 @@ using System.Collections.Concurrent;
 var telegramToken = Environment.GetEnvironmentVariable("TELEGRAM_TOKEN") ?? "";
 var groqKey = Environment.GetEnvironmentVariable("GROQ_KEY") ?? "";
 
-// --- MINI SERVIDOR KEEP-ALIVE PARA UPTIMEROBOT ---
 var port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
 var listener = new HttpListener();
 listener.Prefixes.Add($"http://*:{port}/");
@@ -28,7 +27,6 @@ _ = Task.Run(async () =>
     }
 });
 
-// --- MEMORIA POR CHAT ---
 var historial = new ConcurrentDictionary<long, List<object>>();
 var bot = new TelegramBotClient(telegramToken);
 var me = await bot.GetMe();
@@ -47,10 +45,9 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
         var chatId = update.Message.Chat.Id;
         var textoBajo = mensaje.ToLower();
 
-        // --- TIEMPO REAL ---
         if (textoBajo.Contains("chile") && (textoBajo.Contains("colombia") || textoBajo.Contains("partido") || textoBajo.Contains("jugo") || textoBajo.Contains("jugó") || textoBajo.Contains("resultado")))
         {
-            var r = await BuscarPartido("Chile_vs_Colombia");
+            var r = await BuscarPartido("chile colombia");
             await botClient.SendMessage(chatId, r, cancellationToken: token);
             return;
         }
@@ -75,7 +72,6 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
             return;
         }
 
-        // --- CHAT NORMAL CON MEMORIA ---
         var lista = historial.GetOrAdd(chatId, _ => new List<object>());
         lista.Add(new { role = "user", content = mensaje });
         if (lista.Count > 20) lista.RemoveRange(0, lista.Count - 20);
@@ -93,58 +89,93 @@ Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, Cancell
     return Task.CompletedTask;
 }
 
+string GetStr(JsonElement el, string key)
+{
+    if (el.ValueKind != JsonValueKind.Object) return "";
+    if (el.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String) return v.GetString() ?? "";
+    return "";
+}
+
 async Task<string> BuscarPartido(string busqueda)
 {
     try
     {
         using var http = new HttpClient();
         http.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 ESPACIONITRO");
-        
-        // ESPN no pide key y no bloquea. Buscamos hoy y ayer
-        var hoy = DateTime.UtcNow.ToString("yyyyMMdd");
-        var ayer = DateTime.UtcNow.AddDays(-1).ToString("yyyyMMdd");
-        
-        foreach (var fecha in new[] { hoy, ayer })
+
+        // Buscamos en 3 días: hoy UTC, ayer y anteayer, porque en Chile es un día menos que UTC
+        var fechas = new[]
         {
-            var url = $"https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard?dates={fecha}";
-            var jsonStr = await http.GetStringAsync(url);
+            DateTime.UtcNow.ToString("yyyyMMdd"),
+            DateTime.UtcNow.AddDays(-1).ToString("yyyyMMdd"),
+            DateTime.UtcNow.AddDays(-2).ToString("yyyyMMdd")
+        };
+
+        var partes = busqueda.ToLower().Replace("_vs_", " ").Replace("_", " ").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        foreach (var fecha in fechas)
+        {
+            string jsonStr;
+            try
+            {
+                var url = $"https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard?dates={fecha}";
+                jsonStr = await http.GetStringAsync(url);
+            }
+            catch { continue; }
+
             using var doc = JsonDocument.Parse(jsonStr);
-            
             if (!doc.RootElement.TryGetProperty("events", out var eventos)) continue;
-            
+            if (eventos.ValueKind != JsonValueKind.Array) continue;
+
             foreach (var ev in eventos.EnumerateArray())
             {
-                var nombre = ev.GetProperty("name").GetString() ?? "";
-                var partes = busqueda.Replace("_vs_", " ").Replace("_", " ").ToLower().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                var nombreBajo = nombre.ToLower();
-                bool coincide = partes.All(p => nombreBajo.Contains(p));
-                
-                if (!coincide) continue;
-
-                var comp = ev.GetProperty("competitions")[0];
-                var competidores = comp.GetProperty("competitors");
-                // ESPN a veces pone visita primero, ordenamos por homeAway
-                JsonElement local = default, visita = default;
-                foreach (var c in competidores.EnumerateArray())
+                try
                 {
-                    var ha = c.GetProperty("homeAway").GetString();
-                    if (ha == "home") local = c;
-                    if (ha == "away") visita = c;
+                    var nombre = GetStr(ev, "name");
+                    if (string.IsNullOrEmpty(nombre)) continue;
+                    var nombreBajo = nombre.ToLower();
+                    if (!partes.All(p => nombreBajo.Contains(p))) continue;
+
+                    if (!ev.TryGetProperty("competitions", out var comps)) continue;
+                    if (comps.ValueKind != JsonValueKind.Array || comps.GetArrayLength() == 0) continue;
+                    var comp = comps[0];
+                    if (!comp.TryGetProperty("competitors", out var competidores)) continue;
+
+                    string nombreLocal = "?", nombreVisita = "?", golLocal = "?", golVisita = "?";
+                    foreach (var c in competidores.EnumerateArray())
+                    {
+                        var ha = GetStr(c, "homeAway");
+                        string teamName = "";
+                        if (c.TryGetProperty("team", out var team)) teamName = GetStr(team, "displayName");
+                        string score = "";
+                        if (c.TryGetProperty("score", out var sc) && sc.ValueKind == JsonValueKind.String) score = sc.GetString() ?? "?";
+                        if (ha == "home") { nombreLocal = teamName; golLocal = score; }
+                        if (ha == "away") { nombreVisita = teamName; golVisita = score; }
+                    }
+                    if (nombreLocal == "?")
+                    {
+                        // Si no viene homeAway, tomamos orden 0 y 1
+                        var arr = competidores.EnumerateArray().ToList();
+                        if (arr.Count >= 2)
+                        {
+                            if (arr[0].TryGetProperty("team", out var t0)) nombreLocal = GetStr(t0, "displayName");
+                            if (arr[1].TryGetProperty("team", out var t1)) nombreVisita = GetStr(t1, "displayName");
+                            if (arr[0].TryGetProperty("score", out var s0) && s0.ValueKind == JsonValueKind.String) golLocal = s0.GetString() ?? "?";
+                            if (arr[1].TryGetProperty("score", out var s1) && s1.ValueKind == JsonValueKind.String) golVisita = s1.GetString() ?? "?";
+                        }
+                    }
+
+                    string estado = "";
+                    if (comp.TryGetProperty("status", out var st) && st.TryGetProperty("type", out var stType)) estado = GetStr(stType, "description");
+                    string liga = "";
+                    if (ev.TryGetProperty("league", out var lg)) liga = GetStr(lg, "name");
+
+                    return $"Resultado en vivo:\n{nombreLocal} {golLocal} - {golVisita} {nombreVisita}\nLiga: {liga}\nEstado: {estado}\nFecha buscada: {fecha}";
                 }
-                if (local.ValueKind == JsonValueKind.Undefined) local = competidores[0];
-                if (visita.ValueKind == JsonValueKind.Undefined) visita = competidores[1];
-
-                var nombreLocal = local.GetProperty("team").GetProperty("displayName").GetString();
-                var nombreVisita = visita.GetProperty("team").GetProperty("displayName").GetString();
-                var golLocal = local.TryGetProperty("score", out var gl) ? gl.GetString() ?? "?" : "?";
-                var golVisita = visita.TryGetProperty("score", out var gv) ? gv.GetString() ?? "?" : "?";
-                var estado = comp.GetProperty("status").GetProperty("type").GetProperty("description").GetString();
-                var liga = ev.GetProperty("league").GetProperty("name").GetString();
-
-                return $"Resultado en vivo:\n{nombreLocal} {golLocal} - {golVisita} {nombreVisita}\nLiga: {liga}\nEstado: {estado}\nFecha: {fecha}";
+                catch { continue; }
             }
         }
-        return "No encontré ese partido en hoy ni ayer en ESPN. Prueba con /partido Chile_vs_Colombia";
+        return "No encontré ese partido en los últimos 3 días en ESPN. Prueba con /partido Chile";
     }
     catch (Exception ex) { return $"No pude buscar el partido ahora: {ex.Message}"; }
 }
