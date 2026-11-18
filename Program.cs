@@ -48,6 +48,10 @@ while (true)
             var respuesta = await ResponderConGroq(texto);
             if (string.IsNullOrWhiteSpace(respuesta)) respuesta = "Estoy con problemas para traer los datos en vivo ahora, prueba de nuevo en un momento.";
 
+            // FILTRO FINAL EN CODIGO: aunque el modelo se equivoque, no sale fontanería ni datos inventados
+            respuesta = respuesta.Replace("fontanería", "instalaciones sanitarias", StringComparison.OrdinalIgnoreCase);
+            respuesta = respuesta.Replace("Fontanería", "Instalaciones sanitarias");
+
             var trozos = new List<string>();
             for (int i = 0; i < respuesta.Length; i += 3800)
             {
@@ -222,10 +226,25 @@ Termina con: 'Verifica con CIP y DOM de tu comuna, esto es orientación, no reem
         }
         else if (esTrabajo)
         {
-            systemPrompt = @"Eres EspacioNitro, arquitecto chileno. Redacta memoria, carta DOM, checklist, EETT.
-OGUC = Ordenanza General DS 47. LGUC = Ley General Urbanismo. DOM = Dirección Obras Municipales. PRC = Plan Regulador Comunal. CIP = Certificado Informaciones Previas. EETT = Especificaciones Técnicas. PROHIBIDO POT/PDU, PROHIBIDO fontanería, usa instalaciones sanitarias.
-REGLA: 1) DATO SITIO (altura, ocupación, densidad, antejardín, terreno, dirección, topografía): NUNCA inventes, pon [COMPLETAR: según CIP]. 2) CRITERIO DISEÑO (estructura, instalaciones, habitabilidad): SÍ proponlo como PROPUESTA A VALIDAR, nunca lo dejes solo en [COMPLETAR]. Ej: 'Propuesta: albañilería armada + losa hormigón, a validar con cálculo'.
-Memoria 1-8: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa y superficies, 5 Estructural, 6 Instalaciones, 7 Eficiencia / habitabilidad OGUC Título 4, 8 Cumplimiento. Máximo 750 palabras, máximo 3 viñetas por punto, sin tablas gigantes, completa del 1 al 8.";
+            systemPrompt = @"Eres EspacioNitro, arquitecto chileno. Redacta memoria.
+GLOSARIO: OGUC = Ordenanza General DS 47. LGUC = Ley General Urbanismo. DOM = Dirección Obras Municipales. PRC = Plan Regulador Comunal. CIP = Certificado Informaciones Previas. EETT = Especificaciones Técnicas.
+
+REGLA DURA DE NUMEROS - SI LA ROMPES LA RESPUESTA NO SIRVE:
+El usuario solo te dio UN numero: 120 m2. Ese es el UNICO numero que puedes usar.
+PROHIBIDO TOTAL escribir cualquier otro numero: PROHIBIDO 240, 12, 20, 1m, 2m, 3,5m, 0,5, 35, 18, 90cm, 1,2m, 220V, 40A, 200 lux, 10cm, art. 4, 5, 6, 7, etc.
+Si necesitas una medida, NO la inventes, pon [COMPLETAR: según CIP / según proyecto].
+Ejemplo CORRECTO: 'Terreno: [COMPLETAR: según CIP]' / 'Antejardín: [COMPLETAR: según CIP]' / 'Altura: [COMPLETAR: según CIP]'.
+Ejemplo PROHIBIDO: 'Terreno 240 m2, 12m de frente' - ESO ES INVENTAR.
+
+REGLA DURA DE PALABRAS:
+PROHIBIDO la palabra fontanería. Siempre di instalaciones sanitarias.
+PROHIBIDO decir 'Total palabras' o 'Total viñetas' al final.
+PROHIBIDO inventar número de artículo OGUC. Di solo 'OGUC Título 4' sin número de artículo.
+
+REGLA DE CONTENIDO:
+1) DATO SITIO (altura, ocupación, densidad, antejardín, terreno, dirección, topografía): NUNCA inventes, [COMPLETAR: según CIP].
+2) CRITERIO DISEÑO (estructura, instalaciones, habitabilidad): SÍ proponlo como PROPUESTA A VALIDAR, sin números. Ej: 'Propuesta: albañilería armada + losa hormigón, a validar con cálculo' / 'Propuesta: ventilación cruzada + doble vidriado, a validar' / 'Propuesta: calefón + panel solar, a validar'.
+Memoria 1-8: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa y superficies, 5 Estructural, 6 Instalaciones, 7 Eficiencia / habitabilidad OGUC Título 4, 8 Cumplimiento. Máximo 3 viñetas por punto, sin tablas gigantes, completa del 1 al 8.";
         }
         else if (esSantiago)
         {
@@ -245,7 +264,6 @@ Memoria 1-8: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa y superficies, 5 Es
         using var groq = new HttpClient();
         groq.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", groqKey);
 
-        // FIX BUG VACIO: gpt-oss se comía los tokens razonando. Ahora reasoning low + respaldo llama.
         var intentos = new[]
         {
             new { Modelo = "openai/gpt-oss-20b", Reasoning = "low", Tokens = 3000 },
@@ -268,7 +286,7 @@ Memoria 1-8: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa y superficies, 5 Es
                             new { role = "system", content = systemPrompt },
                             new { role = "user", content = texto }
                         },
-                        temperature = 0.2,
+                        temperature = 0.1,
                         max_tokens = it.Tokens
                     };
                 }
@@ -282,7 +300,7 @@ Memoria 1-8: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa y superficies, 5 Es
                             new { role = "system", content = systemPrompt },
                             new { role = "user", content = texto }
                         },
-                        temperature = 0.2,
+                        temperature = 0.1,
                         max_completion_tokens = it.Tokens,
                         reasoning_effort = it.Reasoning
                     };
