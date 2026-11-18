@@ -77,7 +77,6 @@ async Task<string> ObtenerDatosSantiago()
         var sb = new StringBuilder();
         sb.AppendLine($"FECHA HOY: {DateTime.Now:dd/MM/yyyy HH:mm} America/Santiago");
 
-        // CLIMA - Plan A Open-Meteo, Plan B wttr.in
         bool climaOk = false;
         try
         {
@@ -101,7 +100,6 @@ async Task<string> ObtenerDatosSantiago()
             catch (Exception ex) { Console.WriteLine($"CLIMA B FALLO: {ex.Message}"); }
         }
 
-        // NOTICIAS SANTIAGO - Solo últimas 24h
         try
         {
             var rss = await client.GetStringAsync("https://news.google.com/rss/search?q=Santiago%20Chile&hl=es-419&gl=CL&ceid=CL:es-419");
@@ -212,10 +210,11 @@ GLOSARIO OBLIGATORIO, NO LO CAMBIES:
 - DOM = Dirección de Obras Municipales.
 - PRC = Plan Regulador Comunal, es lo que define cada comuna.
 - CIP = Certificado de Informaciones Previas, es el primer documento que se pide en la DOM.
+- EETT = Especificaciones Técnicas, nunca Estudio de Efectos.
 - Permiso de Edificación se tramita en la DOM de la comuna, no en MINVU.
-PROHIBIDO USAR: POT, PDU, Plan de Ordenamiento Territorial, o decir que OGUC es municipal.
+PROHIBIDO USAR: POT, PDU, Plan de Ordenamiento Territorial, o decir que OGUC es municipal. PROHIBIDO decir fontanería, usa instalaciones sanitarias / agua potable y alcantarillado.
 REGLA: Nunca inventes número de artículo, plazo o documento. Si no estás seguro, di 'verifica en OGUC / CIP / DOM'.
-Para Permiso de Edificación en Chile, la estructura siempre es: 1. Pedir CIP en DOM, 2. Revisar PRC (uso de suelo, altura, ocupación, antejardín), 3. Proyecto de arquitectura + estructura + instalaciones, 4. Expediente: solicitud, planos, memoria, EETT, cálculo, certificados, patente del arquitecto, 5. Ingreso DOM, observaciones, 6. Aprobación y pago de derechos.
+Para Permiso de Edificación en Chile, la estructura siempre es: 1. Pedir CIP en DOM, 2. Revisar PRC (uso de suelo, altura, ocupación, antejardín), 3. Proyecto de arquitectura + estructura + instalaciones, 4. Expediente: solicitud, planos, memoria, EETT (Especificaciones Técnicas), cálculo, certificados, patente del arquitecto, 5. Ingreso DOM, observaciones, 6. Aprobación y pago de derechos.
 Termina siempre con: 'Verifica con CIP y DOM de tu comuna, esto es orientación, no reemplaza la norma'.";
         }
         else if (esTrabajo)
@@ -227,8 +226,10 @@ GLOSARIO OBLIGATORIO:
 - DOM = Dirección de Obras Municipales.
 - PRC = Plan Regulador Comunal.
 - CIP = Certificado de Informaciones Previas.
-PROHIBIDO: decir que LGUC es Ley de Garantía, que DOM son ordenanzas, que NCh 4 es estructural, o usar POT/PDU.
+- EETT = Especificaciones Técnicas.
+PROHIBIDO: decir que LGUC es Ley de Garantía, que DOM son ordenanzas, que NCh 4 es estructural, o usar POT/PDU. PROHIBIDO decir fontanería, usa instalaciones sanitarias.
 Para memoria: usa estructura chilena real: 1. Datos proyecto y propietario, 2. Antecedentes CIP/PRC, 3. Emplazamiento, 4. Programa arquitectónico y superficies (útil, construida), 5. Criterio estructural, 6. Criterio instalaciones, 7. Criterio eficiencia / habitabilidad OGUC Título 4, 8. Cumplimiento normativo.
+REGLA DE FORMATO: Nunca uses tablas gigantes que corten la respuesta. Usa listas cortas con guiones. La memoria debe entregarse COMPLETA, del punto 1 al 8, sin cortar en el punto 3. Si es larga, sé conciso pero completa todos los puntos.
 Para checklist de permiso: usa lista real DOM: Solicitud, CIP, planos arquitectura 1:50, planos estructura, memoria de cálculo, EETT, certificado de factibilidad agua/luz, patente profesional, certificado de dominio vigente.
 Si falta un dato clave, pon [COMPLETAR: ...] y sigue. No inventes superficies, ni materiales, ni cálculos.";
         }
@@ -244,7 +245,7 @@ Si falta un dato clave, pon [COMPLETAR: ...] y sigue. No inventes superficies, n
         }
         else
         {
-            systemPrompt = "Eres EspacioNitro, asistente de arquitectura en Chile y bot de Telegram. Responde corto, claro y en español chileno. Eres amable, profesional, con criterio de arquitecto chileno. Si el usuario habla de arquitectura, responde como arquitecto chileno. Nunca uses POT/PDU, OGUC es nacional DS 47, LGUC es Ley General de Urbanismo y Construcciones, DOM es Dirección de Obras Municipales.";
+            systemPrompt = "Eres EspacioNitro, asistente de arquitectura en Chile y bot de Telegram. Responde corto, claro y en español chileno. Eres amable, profesional, con criterio de arquitecto chileno. Nunca uses POT/PDU, OGUC es nacional DS 47, LGUC es Ley General de Urbanismo y Construcciones, DOM es Dirección de Obras Municipales, EETT son Especificaciones Técnicas.";
         }
 
         using var groq = new HttpClient();
@@ -259,7 +260,7 @@ Si falta un dato clave, pon [COMPLETAR: ...] y sigue. No inventes superficies, n
                 new { role = "user", content = texto }
             },
             temperature = 0.2,
-            max_tokens = 800
+            max_tokens = 2000
         };
 
         var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
