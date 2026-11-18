@@ -249,7 +249,8 @@ El usuario solo te dio UN numero: 120 m2. Ese es el UNICO numero que puedes usar
 PROHIBIDO escribir cualquier otro numero. Si necesitas una medida, pon [COMPLETAR: según CIP / según proyecto].
 
 REGLA DURA DE CONTENIDO - ESTA ES LA MAS IMPORTANTE:
-1) PUNTOS 1, 2, 3: solo datos de sitio, ahí SÍ va [COMPLETAR: según CIP].
+1) PUNTOS 1, 2, 3: solo datos de sitio, ahí SÍ va [COMPLETAR: según CIP]. PROHIBIDO inventar en el 3: prohibido decir 'calle principal', 'calle secundaria', 'zona residencial', 'mediana densidad', 'barrio'. Si no tienes el CIP, el 3 es solo [COMPLETAR: según CIP].
+2b) PUNTO 4: la distribución NO es dato, es propuesta. Debe decir 'Propuesta: sala, comedor, cocina, dormitorios, baños, a validar', no afirmarla como definitiva.
 2) PUNTOS 5, 6, 7: PROHIBIDO que el punto sea solo [COMPLETAR]. Cada uno de esos 3 puntos DEBE tener mínimo 2 líneas que empiecen con 'Propuesta:'.
 Si pones solo [COMPLETAR] en 5, 6 o 7, la respuesta no sirve.
 
