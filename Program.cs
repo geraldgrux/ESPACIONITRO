@@ -48,9 +48,15 @@ while (true)
             var respuesta = await ResponderConGroq(texto);
             if (string.IsNullOrWhiteSpace(respuesta)) respuesta = "Estoy con problemas para traer los datos en vivo ahora, prueba de nuevo en un momento.";
 
-            // FILTRO FINAL EN CODIGO: aunque el modelo se equivoque, no sale fontanería ni datos inventados
+            // FILTRO FINAL: limpiar markdown para que en Telegram se vea limpio
             respuesta = respuesta.Replace("fontanería", "instalaciones sanitarias", StringComparison.OrdinalIgnoreCase);
             respuesta = respuesta.Replace("Fontanería", "Instalaciones sanitarias");
+            respuesta = respuesta.Replace("**", "");
+            respuesta = respuesta.Replace("__", "");
+            respuesta = Regex.Replace(respuesta, @"^#{1,6}\s*", "", RegexOptions.Multiline);
+            respuesta = Regex.Replace(respuesta, @"^---+\s*$", "", RegexOptions.Multiline);
+            respuesta = Regex.Replace(respuesta, @"\n{3,}", "\n\n");
+            respuesta = respuesta.Trim();
 
             var trozos = new List<string>();
             for (int i = 0; i < respuesta.Length; i += 3800)
@@ -213,13 +219,14 @@ async Task<string> ResponderConGroq(string texto)
         {
             var datosArq = await ObtenerNoticiasArquitectura();
             Console.WriteLine($"DATOS ARQ: {datosArq}");
-            systemPrompt = $"Eres EspacioNitro, arquitecto chileno. Responde corto, en español chileno. Solo usa las noticias reales de abajo. No inventes concursos ni cambios de norma. DATOS:\n{datosArq}";
+            systemPrompt = $"Eres EspacioNitro, arquitecto chileno. Responde corto, en español chileno. Solo usa las noticias reales de abajo. No inventes concursos ni cambios de norma. FORMATO: texto plano para Telegram, PROHIBIDO usar # * _ y negritas. Usa MAYUSCULAS para títulos y guion - para listas. DATOS:\n{datosArq}";
         }
         else if (esNormativa)
         {
             systemPrompt = @"Eres EspacioNitro, arquitecto chileno experto OGUC, LGUC y DOM.
 OGUC = Ordenanza General de Urbanismo y Construcciones DS 47 MINVU, norma NACIONAL. LGUC = Ley General de Urbanismo y Construcciones. DOM = Dirección de Obras Municipales. PRC = Plan Regulador Comunal. CIP = Certificado de Informaciones Previas, primer documento en DOM. EETT = Especificaciones Técnicas.
 PROHIBIDO: POT, PDU, decir OGUC municipal, decir fontanería (usa instalaciones sanitarias).
+FORMATO: texto plano para Telegram, PROHIBIDO usar # * _ y negritas. Usa MAYUSCULAS para títulos y guion - para listas. Sin líneas de ---.
 Nunca inventes artículo, plazo o documento. Si no estás seguro, di 'verifica en OGUC / CIP / DOM'.
 Permiso: 1. CIP en DOM, 2. Revisar PRC, 3. Proyecto arquitectura + estructura + instalaciones, 4. Expediente: solicitud, planos, memoria, EETT, cálculo, certificados, patente, 5. Ingreso DOM, 6. Aprobación y pago derechos.
 Termina con: 'Verifica con CIP y DOM de tu comuna, esto es orientación, no reemplaza la norma'.";
@@ -229,22 +236,27 @@ Termina con: 'Verifica con CIP y DOM de tu comuna, esto es orientación, no reem
             systemPrompt = @"Eres EspacioNitro, arquitecto chileno. Redacta memoria.
 GLOSARIO: OGUC = Ordenanza General DS 47. LGUC = Ley General Urbanismo. DOM = Dirección Obras Municipales. PRC = Plan Regulador Comunal. CIP = Certificado Informaciones Previas. EETT = Especificaciones Técnicas.
 
-REGLA DURA DE NUMEROS - SI LA ROMPES LA RESPUESTA NO SIRVE:
-El usuario solo te dio UN numero: 120 m2. Ese es el UNICO numero que puedes usar.
-PROHIBIDO TOTAL escribir cualquier otro numero: PROHIBIDO 240, 12, 20, 1m, 2m, 3,5m, 0,5, 35, 18, 90cm, 1,2m, 220V, 40A, 200 lux, 10cm, art. 4, 5, 6, 7, etc.
-Si necesitas una medida, NO la inventes, pon [COMPLETAR: según CIP / según proyecto].
-Ejemplo CORRECTO: 'Terreno: [COMPLETAR: según CIP]' / 'Antejardín: [COMPLETAR: según CIP]' / 'Altura: [COMPLETAR: según CIP]'.
-Ejemplo PROHIBIDO: 'Terreno 240 m2, 12m de frente' - ESO ES INVENTAR.
+FORMATO OBLIGATORIO PARA TELEGRAM - SI LO ROMPES NO SIRVE:
+PROHIBIDO TOTAL usar estos símbolos: # * _ y PROHIBIDO negritas con **. PROHIBIDO líneas de ---.
+Usa solo texto plano: Títulos en MAYUSCULAS, listas con guion - , y línea en blanco entre puntos.
+Ejemplo CORRECTO:
+MEMORIA DE PROYECTO - CASA EN ÑUÑOA
+1. DATOS DEL SITIO
+- Terreno: [COMPLETAR: según CIP]
+- Altura máxima permitida: [COMPLETAR: según CIP]
 
-REGLA DURA DE PALABRAS:
+REGLA DURA DE NUMEROS:
+El usuario solo te dio UN numero: 120 m2. Ese es el UNICO numero que puedes usar.
+PROHIBIDO escribir cualquier otro numero: PROHIBIDO 240, 12, 20, 1m, 2m, 3,5m, 0,5, 35, 18, 90cm, 1,2m, 220V, 40A, 200 lux, 10cm, art. 4, 5, 6, 7, etc.
+Si necesitas una medida, NO la inventes, pon [COMPLETAR: según CIP / según proyecto].
+Ejemplo CORRECTO: 'Terreno: [COMPLETAR: según CIP]' / 'Antejardín: [COMPLETAR: según CIP]' / 'Altura máxima permitida: [COMPLETAR: según CIP]'.
 PROHIBIDO la palabra fontanería. Siempre di instalaciones sanitarias.
 PROHIBIDO decir 'Total palabras' o 'Total viñetas' al final.
 PROHIBIDO inventar número de artículo OGUC. Di solo 'OGUC Título 4' sin número de artículo.
-
 REGLA DE CONTENIDO:
 1) DATO SITIO (altura, ocupación, densidad, antejardín, terreno, dirección, topografía): NUNCA inventes, [COMPLETAR: según CIP].
-2) CRITERIO DISEÑO (estructura, instalaciones, habitabilidad): SÍ proponlo como PROPUESTA A VALIDAR, sin números. Ej: 'Propuesta: albañilería armada + losa hormigón, a validar con cálculo' / 'Propuesta: ventilación cruzada + doble vidriado, a validar' / 'Propuesta: calefón + panel solar, a validar'.
-Memoria 1-8: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa y superficies, 5 Estructural, 6 Instalaciones, 7 Eficiencia / habitabilidad OGUC Título 4, 8 Cumplimiento. Máximo 3 viñetas por punto, sin tablas gigantes, completa del 1 al 8.";
+2) CRITERIO DISEÑO (estructura, instalaciones, habitabilidad): SÍ proponlo como PROPUESTA A VALIDAR, sin números. Ej: 'Propuesta: albañilería armada + losa hormigón, a validar con cálculo'.
+Memoria 1-8: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa y superficies, 5 Estructural, 6 Instalaciones, 7 Eficiencia / habitabilidad OGUC Título 4, 8 Cumplimiento. Máximo 3 viñetas por punto, completa del 1 al 8.";
         }
         else if (esSantiago)
         {
@@ -254,11 +266,11 @@ Memoria 1-8: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa y superficies, 5 Es
             {
                 return "No pude traer los datos en vivo justo ahora (las fuentes están con límite), prueba de nuevo en 2 minutos.";
             }
-            systemPrompt = $"Eres EspacioNitro, bot Telegram Chile. Responde corto, español chileno. Solo usa DATOS REALES de abajo. No inventes Metro ni tráfico. DATOS:\n{datos}";
+            systemPrompt = $"Eres EspacioNitro, bot Telegram Chile. Responde corto, español chileno. Solo usa DATOS REALES de abajo. No inventes Metro ni tráfico. FORMATO: texto plano, PROHIBIDO # * _ y negritas, usa MAYUSCULAS para títulos y guion - para listas. DATOS:\n{datos}";
         }
         else
         {
-            systemPrompt = "Eres EspacioNitro, arquitecto chileno, bot Telegram. Responde corto, español chileno. OGUC nacional DS 47, LGUC Ley General Urbanismo, DOM Dirección Obras Municipales, EETT Especificaciones Técnicas. Nunca POT/PDU.";
+            systemPrompt = "Eres EspacioNitro, arquitecto chileno, bot Telegram. Responde corto, español chileno. OGUC nacional DS 47, LGUC Ley General Urbanismo, DOM Dirección Obras Municipales, EETT Especificaciones Técnicas. Nunca POT/PDU. FORMATO: texto plano, PROHIBIDO # * _ y negritas.";
         }
 
         using var groq = new HttpClient();
