@@ -62,7 +62,7 @@ async Task<string> ResponderConGroq(string texto)
 
         var payload = new
         {
-            model = "llama-3.1-8b-instant",
+            model = "openai/gpt-oss-20b",
             messages = new[]
             {
                 new { role = "system", content = "Eres EspacioNitro, bot de Telegram en Chile. Responde corto, claro y en español chileno. Si preguntan qué pasó hoy en Santiago, resume contingencia, tránsito, metro y clima." },
