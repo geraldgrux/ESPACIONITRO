@@ -64,7 +64,10 @@ while (true)
 async Task<string> ObtenerDatosSantiago()
 {
     if (!string.IsNullOrWhiteSpace(cacheDatos) && (DateTime.UtcNow - cacheHora).TotalMinutes < 15)
+    {
+        Console.WriteLine("DATOS: usando caché Santiago");
         return cacheDatos;
+    }
 
     try
     {
@@ -74,6 +77,7 @@ async Task<string> ObtenerDatosSantiago()
         var sb = new StringBuilder();
         sb.AppendLine($"FECHA HOY: {DateTime.Now:dd/MM/yyyy HH:mm} America/Santiago");
 
+        // CLIMA - Plan A Open-Meteo, Plan B wttr.in
         bool climaOk = false;
         try
         {
@@ -97,6 +101,7 @@ async Task<string> ObtenerDatosSantiago()
             catch (Exception ex) { Console.WriteLine($"CLIMA B FALLO: {ex.Message}"); }
         }
 
+        // NOTICIAS SANTIAGO - Solo últimas 24h
         try
         {
             var rss = await client.GetStringAsync("https://news.google.com/rss/search?q=Santiago%20Chile&hl=es-419&gl=CL&ceid=CL:es-419");
@@ -132,7 +137,10 @@ async Task<string> ObtenerDatosSantiago()
 async Task<string> ObtenerNoticiasArquitectura()
 {
     if (!string.IsNullOrWhiteSpace(cacheArq) && (DateTime.UtcNow - cacheArqHora).TotalMinutes < 60)
+    {
+        Console.WriteLine("DATOS: usando caché Arquitectura");
         return cacheArq;
+    }
 
     try
     {
@@ -142,7 +150,7 @@ async Task<string> ObtenerNoticiasArquitectura()
         var sb = new StringBuilder();
         sb.AppendLine("NOTICIAS ARQUITECTURA CHILE ULTIMAS 48H:");
 
-        var queries = new[] { "arquitectura Chile", "MINVU Chile", "OGUC Chile", "Colegio de Arquitectos Chile", "concurso arquitectura Chile" };
+        var queries = new[] { "concurso arquitectura Chile", "Colegio de Arquitectos Chile", "premio arquitectura Chile", "proyecto arquitectura Chile", "bienal arquitectura Chile" };
         foreach (var q in queries)
         {
             try
@@ -169,6 +177,7 @@ async Task<string> ObtenerNoticiasArquitectura()
             }
             catch { }
         }
+
         var r = sb.ToString();
         cacheArq = r; cacheArqHora = DateTime.UtcNow;
         return r;
@@ -182,34 +191,60 @@ async Task<string> ResponderConGroq(string texto)
     {
         var lower = texto.ToLower();
         bool esSantiago = lower.Contains("santiago") || lower.Contains("paso hoy") || lower.Contains("clima") || lower.Contains("tiempo") || lower.Contains("metro") || lower.Contains("lluvia");
-        bool esArqNoticias = lower.Contains("arquitectura") || lower.Contains("minvu") || lower.Contains("oguc") || lower.Contains("colegio de arquitectos") || lower.Contains("concurso") || lower.Contains("noticia") && lower.Contains("arquitect");
-        bool esNormativa = lower.Contains("oguc") || lower.Contains("lguc") || lower.Contains("permiso") || lower.Contains("anteproyecto") || lower.Contains("recepcion") || lower.Contains("recepción") || lower.Contains("dom") || lower.Contains("normativa") || lower.Contains("articulo") || lower.Contains("artículo");
-        bool esTrabajo = lower.Contains("memoria") || lower.Contains("carta") || lower.Contains("expediente") || lower.Contains("presupuesto") || lower.Contains("especificacion") || lower.Contains("especificación") || lower.Contains("redacta") || lower.Contains("checklist") || lower.Contains("informe");
+        bool esArqNoticias = lower.Contains("noticias") && (lower.Contains("arquitect") || lower.Contains("minvu") || lower.Contains("oguc") || lower.Contains("colegio") || lower.Contains("concurso")) || lower.Contains("noticias de arquitectura") || lower.Contains("que noticias hay de arquitectura");
+        bool esNormativa = lower.Contains("oguc") || lower.Contains("lguc") || lower.Contains("permiso") || lower.Contains("anteproyecto") || lower.Contains("recepcion") || lower.Contains("recepción") || lower.Contains("dom") || lower.Contains("normativa") || lower.Contains("articulo") || lower.Contains("artículo") || lower.Contains("cip") || lower.Contains("prc");
+        bool esTrabajo = lower.Contains("memoria") || lower.Contains("carta") || lower.Contains("expediente") || lower.Contains("presupuesto") || lower.Contains("especificacion") || lower.Contains("especificación") || lower.Contains("redacta") || lower.Contains("checklist") || lower.Contains("informe") || lower.Contains("redactame") || lower.Contains("redáctame");
 
         string systemPrompt;
-        string datosExtra = "";
 
-        if (esArqNoticias || lower.Contains("noticias arquitectura"))
+        if (esArqNoticias)
         {
-            datosExtra = await ObtenerNoticiasArquitectura();
-            systemPrompt = $"Eres EspacioNitro, asistente de arquitectura en Chile. Eres arquitecto chileno con experiencia en OGUC, LGUC, MINVU y DOM. Responde corto, claro, en español chileno, con criterio profesional. REGLA: Solo usa las noticias reales de abajo para noticias. No inventes concursos ni cambios de norma. Si no hay noticia, dilo. DATOS:\n{datosExtra}";
+            var datosArq = await ObtenerNoticiasArquitectura();
+            Console.WriteLine($"DATOS ARQ: {datosArq}");
+            systemPrompt = $"Eres EspacioNitro, asistente de arquitectura en Chile. Eres arquitecto chileno con experiencia en OGUC, LGUC, MINVU y DOM. Responde corto, claro, en español chileno, con criterio profesional. REGLA: Solo usa las noticias reales de abajo. No inventes concursos ni cambios de norma. Si no hay noticia, dilo. DATOS:\n{datosArq}";
         }
         else if (esNormativa)
         {
-            systemPrompt = "Eres EspacioNitro, asistente de arquitectura en Chile. Eres arquitecto chileno experto en OGUC, LGUC y trámites DOM. REGLA OBLIGATORIA: Nunca inventes números de artículos, ni plazos, ni documentos. Si no estás 100% seguro del artículo exacto, dilo: 'No tengo la fuente confirmada, verifica en OGUC / consulta en la DOM'. Explica el criterio general, el procedimiento y qué revisar, no el artículo inventado. Termina siempre con: 'Verifica con la DOM / PRC de tu comuna, esto es orientación, no reemplaza la norma'. Responde estructurado y práctico.";
+            systemPrompt = @"Eres EspacioNitro, arquitecto chileno experto en OGUC, LGUC y trámites DOM en Chile.
+GLOSARIO OBLIGATORIO, NO LO CAMBIES:
+- OGUC = Ordenanza General de Urbanismo y Construcciones, Decreto Supremo N°47 del MINVU, norma NACIONAL.
+- LGUC = Ley General de Urbanismo y Construcciones.
+- DOM = Dirección de Obras Municipales.
+- PRC = Plan Regulador Comunal, es lo que define cada comuna.
+- CIP = Certificado de Informaciones Previas, es el primer documento que se pide en la DOM.
+- Permiso de Edificación se tramita en la DOM de la comuna, no en MINVU.
+PROHIBIDO USAR: POT, PDU, Plan de Ordenamiento Territorial, o decir que OGUC es municipal.
+REGLA: Nunca inventes número de artículo, plazo o documento. Si no estás seguro, di 'verifica en OGUC / CIP / DOM'.
+Para Permiso de Edificación en Chile, la estructura siempre es: 1. Pedir CIP en DOM, 2. Revisar PRC (uso de suelo, altura, ocupación, antejardín), 3. Proyecto de arquitectura + estructura + instalaciones, 4. Expediente: solicitud, planos, memoria, EETT, cálculo, certificados, patente del arquitecto, 5. Ingreso DOM, observaciones, 6. Aprobación y pago de derechos.
+Termina siempre con: 'Verifica con CIP y DOM de tu comuna, esto es orientación, no reemplaza la norma'.";
         }
         else if (esTrabajo)
         {
-            systemPrompt = "Eres EspacioNitro, asistente de arquitectura en Chile. Ayudas a redactar documentos profesionales: memoria de proyecto, carta a DOM, expediente de permiso, checklist, especificaciones, presupuestos. Usa formato profesional chileno, claro, sin florituras. Si te piden redactar, entrega el documento listo para copiar, con [corchetes] para los datos que faltan. Si te piden checklist, entrega checklist con casillas. Pregunta solo lo esencial si falta un dato clave.";
+            systemPrompt = @"Eres EspacioNitro, arquitecto chileno. Ayudas a redactar memoria, carta DOM, expediente, checklist, EETT.
+GLOSARIO OBLIGATORIO:
+- OGUC = Ordenanza General de Urbanismo y Construcciones DS 47.
+- LGUC = Ley General de Urbanismo y Construcciones.
+- DOM = Dirección de Obras Municipales.
+- PRC = Plan Regulador Comunal.
+- CIP = Certificado de Informaciones Previas.
+PROHIBIDO: decir que LGUC es Ley de Garantía, que DOM son ordenanzas, que NCh 4 es estructural, o usar POT/PDU.
+Para memoria: usa estructura chilena real: 1. Datos proyecto y propietario, 2. Antecedentes CIP/PRC, 3. Emplazamiento, 4. Programa arquitectónico y superficies (útil, construida), 5. Criterio estructural, 6. Criterio instalaciones, 7. Criterio eficiencia / habitabilidad OGUC Título 4, 8. Cumplimiento normativo.
+Para checklist de permiso: usa lista real DOM: Solicitud, CIP, planos arquitectura 1:50, planos estructura, memoria de cálculo, EETT, certificado de factibilidad agua/luz, patente profesional, certificado de dominio vigente.
+Si falta un dato clave, pon [COMPLETAR: ...] y sigue. No inventes superficies, ni materiales, ni cálculos.";
         }
         else if (esSantiago)
         {
-            datosExtra = await ObtenerDatosSantiago();
-            systemPrompt = $"Eres EspacioNitro, bot de Telegram en Chile. Responde corto, claro y en español chileno. REGLA: Solo usa DATOS REALES de abajo. No inventes Metro ni tráfico. DATOS:\n{datosExtra}";
+            var datos = await ObtenerDatosSantiago();
+            Console.WriteLine($"DATOS: {datos}");
+            if (datos.Contains("Sin datos reales"))
+            {
+                return "No pude traer los datos en vivo justo ahora (las fuentes están con límite), prueba de nuevo en 2 minutos.";
+            }
+            systemPrompt = $"Eres EspacioNitro, bot de Telegram en Chile. Responde corto, claro y en español chileno. REGLA: Solo usa DATOS REALES de abajo. No inventes Metro ni tráfico. Si un dato no está, di 'no hay info confirmada'. DATOS:\n{datos}";
         }
         else
         {
-            systemPrompt = "Eres EspacioNitro, asistente de arquitectura en Chile y bot de Telegram. Responde corto, claro y en español chileno. Eres amable, profesional, con criterio de arquitecto. Si el usuario habla de arquitectura, responde como arquitecto chileno.";
+            systemPrompt = "Eres EspacioNitro, asistente de arquitectura en Chile y bot de Telegram. Responde corto, claro y en español chileno. Eres amable, profesional, con criterio de arquitecto chileno. Si el usuario habla de arquitectura, responde como arquitecto chileno. Nunca uses POT/PDU, OGUC es nacional DS 47, LGUC es Ley General de Urbanismo y Construcciones, DOM es Dirección de Obras Municipales.";
         }
 
         using var groq = new HttpClient();
