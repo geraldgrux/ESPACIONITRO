@@ -9,7 +9,6 @@ var groqKey = Environment.GetEnvironmentVariable("GROQ_KEY") ?? "";
 
 app.MapGet("/", () => "EspacioNitro Telegram OK - NET10");
 
-// Para que Render lo vea vivo
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 _ = app.RunAsync($"http://+:{port}");
 
@@ -22,7 +21,6 @@ while (true)
 {
     try
     {
-        // 1. Pedir mensajes nuevos a Telegram
         var updatesJson = await http.GetStringAsync(
             $"https://api.telegram.org/bot{telegramToken}/getUpdates?offset={offset}&timeout=30");
 
@@ -40,10 +38,8 @@ while (true)
             var texto = textEl.GetString() ?? "";
             Console.WriteLine($"MENSAJE: {texto} de {chatId}");
 
-            // 2. Generar respuesta con Groq
             var respuesta = await ResponderConGroq(texto);
 
-            // 3. Responder en Telegram
             var payload = new { chat_id = chatId, text = respuesta };
             var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
             await http.PostAsync($"https://api.telegram.org/bot{telegramToken}/sendMessage", content);
@@ -66,7 +62,7 @@ async Task<string> ResponderConGroq(string texto)
 
         var payload = new
         {
-            model = "llama-3.3-70b-versatile",
+            model = "llama-3.1-8b-instant",
             messages = new[]
             {
                 new { role = "system", content = "Eres EspacioNitro, bot de Telegram en Chile. Responde corto, claro y en español chileno. Si preguntan qué pasó hoy en Santiago, resume contingencia, tránsito, metro y clima." },
@@ -82,7 +78,14 @@ async Task<string> ResponderConGroq(string texto)
         Console.WriteLine($"GROQ: {res.StatusCode}");
 
         using var doc = JsonDocument.Parse(json);
-        return doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "No pude responder ahora, prueba de nuevo.";
+
+        if (!doc.RootElement.TryGetProperty("choices", out var choices))
+        {
+            Console.WriteLine($"GROQ RESPUESTA RARA: {json}");
+            return "Estoy con problemas con Groq ahora, prueba de nuevo en un momento.";
+        }
+
+        return choices[0].GetProperty("message").GetProperty("content").GetString() ?? "No pude responder ahora, prueba de nuevo.";
     }
     catch (Exception ex)
     {
