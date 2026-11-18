@@ -15,6 +15,10 @@ _ = app.RunAsync($"http://+:{port}");
 
 Console.WriteLine("Bot Telegram iniciado...");
 
+// CACHE para no saturar las APIs - 15 minutos
+string cacheDatos = "";
+DateTime cacheHora = DateTime.MinValue;
+
 using var http = new HttpClient();
 var offset = 0L;
 
@@ -40,11 +44,12 @@ while (true)
             Console.WriteLine($"MENSAJE: {texto} de {chatId}");
 
             var respuesta = await ResponderConGroq(texto);
+            if (string.IsNullOrWhiteSpace(respuesta)) respuesta = "Estoy con problemas para traer los datos en vivo ahora, prueba de nuevo en un momento.";
 
             var payload = new { chat_id = chatId, text = respuesta };
             var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-            await http.PostAsync($"https://api.telegram.org/bot{telegramToken}/sendMessage", content);
-            Console.WriteLine($"RESPONDIDO A {chatId}");
+            var send = await http.PostAsync($"https://api.telegram.org/bot{telegramToken}/sendMessage", content);
+            Console.WriteLine($"RESPONDIDO A {chatId} - Telegram: {send.StatusCode}");
         }
     }
     catch (Exception ex)
@@ -56,6 +61,13 @@ while (true)
 
 async Task<string> ObtenerDatosReales()
 {
+    // Si el caché tiene menos de 15 min, lo reusamos
+    if (!string.IsNullOrWhiteSpace(cacheDatos) && (DateTime.UtcNow - cacheHora).TotalMinutes < 15)
+    {
+        Console.WriteLine("DATOS: usando caché");
+        return cacheDatos;
+    }
+
     try
     {
         using var client = new HttpClient();
@@ -63,9 +75,10 @@ async Task<string> ObtenerDatosReales()
         client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 EspacioNitroBot");
         var sb = new StringBuilder();
 
+        // 1. CLIMA REAL SANTIAGO - Open-Meteo
         try
         {
-            var climaJson = await client.GetStringAsync("https://api.open-meteo.com/v1/forecast?latitude=-33.45&longitude=-70.66&current=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m&timezone=America%2FSantiago");
+            var climaJson = await client.GetStringAsync("https://api.open-meteo.com/v1/forecast?latitude=-33.45&longitude=-70.66&current=temperature_2m,precipitation,wind_speed_10m&timezone=America%2FSantiago");
             using var d = JsonDocument.Parse(climaJson);
             var cur = d.RootElement.GetProperty("current");
             var temp = cur.GetProperty("temperature_2m").GetDouble();
@@ -76,21 +89,30 @@ async Task<string> ObtenerDatosReales()
         }
         catch (Exception ex) { Console.WriteLine($"CLIMA FALLO: {ex.Message}"); }
 
+        // 2. NOTICIAS REALES - Google News RSS Chile (no falla con 404)
         try
         {
-            var rss = await client.GetStringAsync("https://www.biobiochile.cl/feed/");
-            var titulos = Regex.Matches(rss, @"<title>(.*?)</title>").Take(9).Select(m => Regex.Replace(m.Groups[1].Value, "<.*?>", "").Trim()).Where(t => t.Length > 10 && t != "BioBioChile").ToList();
-            sb.AppendLine("NOTICIAS REALES DE HOY (BioBio):");
+            var rss = await client.GetStringAsync("https://news.google.com/rss/search?q=Santiago%20Chile&hl=es-419&gl=CL&ceid=CL:es-419");
+            var titulos = Regex.Matches(rss, @"<title>(.*?)</title>").Take(9).Select(m => Regex.Replace(m.Groups[1].Value, "<.*?>", "").Trim()).Where(t => t.Length > 10 && !t.Contains("Google News")).ToList();
+            sb.AppendLine("NOTICIAS REALES DE HOY (Google News Chile):");
             foreach (var t in titulos) sb.AppendLine($"- {t}");
         }
         catch (Exception ex) { Console.WriteLine($"NOTICIAS FALLO: {ex.Message}"); }
 
         var resultado = sb.ToString();
-        if (string.IsNullOrWhiteSpace(resultado)) return "Sin datos reales disponibles en este momento.";
-        return resultado;
+        if (!string.IsNullOrWhiteSpace(resultado))
+        {
+            cacheDatos = resultado;
+            cacheHora = DateTime.UtcNow;
+            return resultado;
+        }
+
+        if (!string.IsNullOrWhiteSpace(cacheDatos)) return cacheDatos;
+        return "Sin datos reales disponibles en este momento.";
     }
     catch
     {
+        if (!string.IsNullOrWhiteSpace(cacheDatos)) return cacheDatos;
         return "Sin datos reales disponibles en este momento.";
     }
 }
@@ -107,7 +129,11 @@ async Task<string> ResponderConGroq(string texto)
         {
             var datosReales = await ObtenerDatosReales();
             Console.WriteLine($"DATOS: {datosReales}");
-            systemPrompt = $"Eres EspacioNitro, bot de Telegram en Chile. Responde corto, claro y en español chileno. REGLA OBLIGATORIA para esta pregunta: Solo usa los DATOS REALES de abajo. No inventes contingencia, ni cortes de Metro, ni tráfico. Si un dato no está en los datos reales, di 'no hay info confirmada sobre eso, pero el clima actual es...'. DATOS REALES:\n{datosReales}";
+            if (datosReales.Contains("Sin datos reales"))
+            {
+                return "No pude traer los datos en vivo justo ahora (las fuentes están con límite), prueba de nuevo en 2 minutos. El bot sigue funcionando para conversar normal.";
+            }
+            systemPrompt = $"Eres EspacioNitro, bot de Telegram en Chile. Responde corto, claro y en español chileno. REGLA: Solo usa los DATOS REALES de abajo. No inventes Metro ni tráfico. Si un dato no está, di 'no hay info confirmada sobre eso'. DATOS REALES:\n{datosReales}";
         }
         else
         {
@@ -142,7 +168,9 @@ async Task<string> ResponderConGroq(string texto)
             return "Estoy con problemas con Groq ahora, prueba de nuevo en un momento.";
         }
 
-        return choices[0].GetProperty("message").GetProperty("content").GetString() ?? "No pude responder ahora, prueba de nuevo.";
+        var resp = choices[0].GetProperty("message").GetProperty("content").GetString();
+        if (string.IsNullOrWhiteSpace(resp)) return "No pude armar la respuesta, prueba de nuevo con '¿Qué pasó hoy en Santiago?'";
+        return resp;
     }
     catch (Exception ex)
     {
