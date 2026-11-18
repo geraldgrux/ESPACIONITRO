@@ -262,7 +262,12 @@ async Task<string> BuscarPartido(string busqueda)
                     string fechaChilena = fecha;
                     try
                     {
-                        if (DateTime.TryParse(fechaPartido, out var dt)) fechaChilena = dt.ToString("dd/MM/yyyy HH:mm") + " UTC";
+                        if (DateTime.TryParse(fechaPartido, out var dt)) 
+{
+    var chile = TimeZoneInfo.FindSystemTimeZoneById("America/Santiago");
+    var dtChile = TimeZoneInfo.ConvertTimeFromUtc(dt.ToUniversalTime(), chile);
+    fechaChilena = dtChile.ToString("dd/MM/yyyy HH:mm") + " hora Chile";
+}
                     }
                     catch { }
 
