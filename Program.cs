@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 using Telegram.Bot;
 using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
@@ -15,7 +16,6 @@ using Telegram.Bot.Types.Enums;
 var telegramToken = Environment.GetEnvironmentVariable("TELEGRAM_TOKEN") ?? "";
 var groqKey = Environment.GetEnvironmentVariable("GROQ_KEY") ?? "";
 
-// --- MINI SERVIDOR KEEP-ALIVE PARA UPTIMEROBOT ---
 var port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
 var listener = new HttpListener();
 listener.Prefixes.Add($"http://*:{port}/");
@@ -33,7 +33,6 @@ _ = Task.Run(async () =>
     }
 });
 
-// --- MEMORIA POR CHAT ---
 var historial = new ConcurrentDictionary<long, List<object>>();
 var bot = new TelegramBotClient(telegramToken);
 var me = await bot.GetMe();
@@ -52,7 +51,7 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
         var chatId = update.Message.Chat.Id;
         var textoBajo = mensaje.ToLower();
 
-        if (textoBajo.Contains("chile") && (textoBajo.Contains("colombia") || textoBajo.Contains("partido") || textoBajo.Contains("jugo") || textoBajo.Contains("jugó") || textoBajo.Contains("resultado")))
+        if (textoBajo.Contains("chile") && (textoBajo.Contains("colombia") || textoBajo.Contains("partido") || textoBajo.Contains("jugo") || textoBajo.Contains("jugó") || textoBajo.Contains("resultado") || textoBajo.Contains("como quedo") || textoBajo.Contains("como quedó") || textoBajo.Contains("quien gano") || textoBajo.Contains("quién ganó")))
         {
             var r = await BuscarPartido("chile colombia");
             await botClient.SendMessage(chatId, r, cancellationToken: token);
@@ -78,11 +77,37 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
             await botClient.SendMessage(chatId, r, cancellationToken: token);
             return;
         }
+        if (textoBajo.StartsWith("/contingencia") || textoBajo.Contains("contingencia") || textoBajo.Contains("que esta pasando en chile") || textoBajo.Contains("que pasa en chile") || textoBajo.Contains("que paso en chile"))
+        {
+            var r = await BuscarNoticias("Chile contingencia hoy", "Contingencia Chile");
+            await botClient.SendMessage(chatId, r, cancellationToken: token);
+            return;
+        }
+        if (textoBajo.StartsWith("/actualidad") || textoBajo.StartsWith("/noticias") || textoBajo.Contains("noticias de hoy") || textoBajo.Contains("actualidad"))
+        {
+            var r = await BuscarNoticias("actualidad mundo hoy", "Actualidad");
+            await botClient.SendMessage(chatId, r, cancellationToken: token);
+            return;
+        }
+        if (textoBajo.StartsWith("/espacio") || textoBajo.Contains("noticias del espacio") || textoBajo.Contains("noticias espacio"))
+        {
+            var r = await BuscarNoticias("NASA espacio astronomia", "Noticias del Espacio");
+            await botClient.SendMessage(chatId, r, cancellationToken: token);
+            return;
+        }
+        if (textoBajo.StartsWith("/arquitectura") || textoBajo.StartsWith("/archi") || textoBajo.Contains("arquitectura"))
+        {
+            var tema = mensaje.Replace("/arquitectura", "").Replace("/archi", "").Trim();
+            if (string.IsNullOrEmpty(tema)) tema = "tendencias arquitectura 2026";
+            var r = await BuscarArquitectura(tema);
+            await botClient.SendMessage(chatId, r, cancellationToken: token);
+            return;
+        }
 
         var lista = historial.GetOrAdd(chatId, _ => new List<object>());
         lista.Add(new { role = "user", content = mensaje });
         if (lista.Count > 20) lista.RemoveRange(0, lista.Count - 20);
-        var respuesta = await PreguntarGroq(lista);
+        var respuesta = await PreguntarGroq(lista, false);
         lista.Add(new { role = "assistant", content = respuesta });
         if (lista.Count > 20) lista.RemoveRange(0, lista.Count - 20);
         await botClient.SendMessage(chatId, respuesta, cancellationToken: token);
@@ -103,22 +128,33 @@ string GetStr(JsonElement el, string key)
     return "";
 }
 
+// Traduce el estado de ESPN a español que se entienda
+string TraducirEstado(string estadoIngles, string displayClock, string shortDetail)
+{
+    var e = (estadoIngles + " " + shortDetail).ToLower();
+    if (e.Contains("full time") || e.Contains("final")) return "Ya terminó";
+    if (e.Contains("half")) return "Entretiempo - Están en el descanso";
+    if (e.Contains("in progress") || e.Contains("live") || e.Contains("'")) return $"Están jugando ahora mismo - Minuto {displayClock}";
+    if (e.Contains("scheduled") || e.Contains("pregame") || e.Contains("not started")) return "Aún no empieza";
+    if (e.Contains("postponed")) return "Se suspendió";
+    if (e.Contains("cancelled")) return "Se canceló";
+    if (!string.IsNullOrEmpty(displayClock) && displayClock.Contains("'")) return $"Están jugando - {displayClock}";
+    return "Ya terminó";
+}
+
 async Task<string> BuscarPartido(string busqueda)
 {
     try
     {
         using var http = new HttpClient();
         http.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 ESPACIONITRO");
-
         var fechas = new[]
         {
             DateTime.UtcNow.ToString("yyyyMMdd"),
             DateTime.UtcNow.AddDays(-1).ToString("yyyyMMdd"),
             DateTime.UtcNow.AddDays(-2).ToString("yyyyMMdd")
         };
-
         var partes = busqueda.ToLower().Replace("_vs_", " ").Replace("_", " ").Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
         foreach (var fecha in fechas)
         {
             string jsonStr;
@@ -128,11 +164,9 @@ async Task<string> BuscarPartido(string busqueda)
                 jsonStr = await http.GetStringAsync(url);
             }
             catch { continue; }
-
             using var doc = JsonDocument.Parse(jsonStr);
             if (!doc.RootElement.TryGetProperty("events", out var eventos)) continue;
             if (eventos.ValueKind != JsonValueKind.Array) continue;
-
             foreach (var ev in eventos.EnumerateArray())
             {
                 try
@@ -141,7 +175,6 @@ async Task<string> BuscarPartido(string busqueda)
                     if (string.IsNullOrEmpty(nombre)) continue;
                     var nombreBajo = nombre.ToLower();
                     if (!partes.All(p => nombreBajo.Contains(p))) continue;
-
                     if (!ev.TryGetProperty("competitions", out var comps)) continue;
                     if (comps.ValueKind != JsonValueKind.Array || comps.GetArrayLength() == 0) continue;
                     var comp = comps[0];
@@ -170,18 +203,85 @@ async Task<string> BuscarPartido(string busqueda)
                         }
                     }
 
-                    string estado = "";
-                    if (comp.TryGetProperty("status", out var st) && st.TryGetProperty("type", out var stType)) estado = GetStr(stType, "description");
+                    // Datos del partido para explicar
+                    string estadoOriginal = "";
+                    string reloj = "";
+                    string detalleCorto = "";
+                    string estadio = "";
+                    string fechaPartido = GetStr(ev, "date");
+                    if (comp.TryGetProperty("status", out var st))
+                    {
+                        if (st.TryGetProperty("type", out var stType))
+                        {
+                            estadoOriginal = GetStr(stType, "description");
+                            detalleCorto = GetStr(stType, "shortDetail");
+                        }
+                        reloj = GetStr(st, "displayClock");
+                    }
+                    if (comp.TryGetProperty("venue", out var venue)) estadio = GetStr(venue, "fullName");
+                    if (string.IsNullOrEmpty(estadio) && comp.TryGetProperty("venue", out var v2)) estadio = GetStr(v2, "shortName");
+
                     string liga = "";
                     if (ev.TryGetProperty("league", out var lg)) liga = GetStr(lg, "name");
                     if (string.IsNullOrEmpty(liga)) liga = "Amistoso Internacional";
 
-                    return $"Resultado en vivo:\n{nombreLocal} {golLocal} - {golVisita} {nombreVisita}\nLiga: {liga}\nEstado: {estado}";
+                    string estadoEsp = TraducirEstado(estadoOriginal, reloj, detalleCorto);
+
+                    // Explicación en español normal
+                    string explicacion = "";
+                    int gL = int.TryParse(golLocal, out var glInt) ? glInt : -1;
+                    int gV = int.TryParse(golVisita, out var gvInt) ? gvInt : -1;
+
+                    if (estadoEsp == "Ya terminó")
+                    {
+                        if (gL == gV)
+                        {
+                            if (gL == 0) explicacion = $"Empataron 0-0, no hubo goles. Fue un partido sin goles, nadie ganó.";
+                            else explicacion = $"Empataron {gL}-{gV}, nadie ganó, quedaron igual.";
+                        }
+                        else if (gL > gV) explicacion = $"Ganó {nombreLocal} por {gL}-{gV} contra {nombreVisita}.";
+                        else explicacion = $"Ganó {nombreVisita} por {gV}-{gL} contra {nombreLocal}.";
+                    }
+                    else if (estadoEsp.StartsWith("Están jugando"))
+                    {
+                        if (gL == gV) explicacion = $"Van empatando {gL}-{gV} en este momento.";
+                        else if (gL > gV) explicacion = $"Va ganando {nombreLocal} {gL}-{gV} en este momento.";
+                        else explicacion = $"Va ganando {nombreVisita} {gV}-{gL} en este momento.";
+                    }
+                    else if (estadoEsp == "Aún no empieza")
+                    {
+                        explicacion = $"Todavía no juegan, el partido está programado.";
+                    }
+                    else if (estadoEsp.Contains("Entretiempo"))
+                    {
+                        explicacion = $"Están en el descanso, el marcador va {gL}-{gV}.";
+                    }
+                    else explicacion = $"Marcador actual: {gL}-{gV}.";
+
+                    // Fecha en hora Chile
+                    string fechaChilena = fecha;
+                    try
+                    {
+                        if (DateTime.TryParse(fechaPartido, out var dt)) fechaChilena = dt.ToString("dd/MM/yyyy HH:mm") + " UTC";
+                    }
+                    catch { }
+
+                    var sb = new StringBuilder();
+                    sb.AppendLine($"{nombreLocal} {golLocal} - {golVisita} {nombreVisita}");
+                    sb.AppendLine($"{estadoEsp}");
+                    sb.AppendLine("");
+                    sb.AppendLine(explicacion);
+                    sb.AppendLine("");
+                    sb.AppendLine($"Torneo: {liga}");
+                    if (!string.IsNullOrEmpty(estadio)) sb.AppendLine($"Estadio: {estadio}");
+                    sb.AppendLine($"Fecha: {fechaChilena}");
+
+                    return sb.ToString();
                 }
                 catch { continue; }
             }
         }
-        return "No encontré ese partido en los últimos 3 días en ESPN. Prueba con /partido Chile";
+        return "No encontré ese partido en los últimos 3 días. Prueba con /partido Chile";
     }
     catch (Exception ex) { return $"No pude buscar el partido ahora: {ex.Message}"; }
 }
@@ -220,18 +320,88 @@ async Task<string> BuscarNasa()
     catch (Exception ex) { return $"No pude traer la NASA: {ex.Message}"; }
 }
 
-async Task<string> PreguntarGroq(List<object> historialChat)
+async Task<string> BuscarNoticias(string query, string titulo)
+{
+    try
+    {
+        using var http = new HttpClient();
+        http.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 ESPACIONITRO");
+        var url = $"https://news.google.com/rss/search?q={Uri.EscapeDataString(query)}&hl=es-419&gl=CL&ceid=CL:es-419";
+        var xmlStr = await http.GetStringAsync(url);
+        var doc = XDocument.Parse(xmlStr);
+        var items = doc.Descendants("item").Take(5).ToList();
+        if (items.Count == 0) return "No encontré noticias ahora, intenta de nuevo en un rato.";
+        var sb = new StringBuilder();
+        sb.AppendLine($"{titulo} - Hoy:");
+        sb.AppendLine("");
+        int i = 1;
+        foreach (var it in items)
+        {
+            var t = it.Element("title")?.Value ?? "";
+            var link = it.Element("link")?.Value ?? "";
+            sb.AppendLine($"{i}. {t}");
+            if (!string.IsNullOrEmpty(link)) sb.AppendLine($"   {link}");
+            i++;
+        }
+        return sb.ToString();
+    }
+    catch (Exception ex) { return $"No pude traer noticias: {ex.Message}"; }
+}
+
+async Task<string> BuscarArquitectura(string tema)
+{
+    try
+    {
+        var explicacion = await PreguntarGroq(new List<object> { new { role = "user", content = tema } }, true);
+        string proyectos = "";
+        try
+        {
+            using var http = new HttpClient();
+            http.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 ESPACIONITRO");
+            var url = $"https://news.google.com/rss/search?q={Uri.EscapeDataString("arquitectura " + tema + " ArchDaily")}&hl=es-419&gl=CL&ceid=CL:es-419";
+            var xmlStr = await http.GetStringAsync(url);
+            var doc = XDocument.Parse(xmlStr);
+            var items = doc.Descendants("item").Take(3).ToList();
+            if (items.Count > 0)
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine("");
+                sb.AppendLine("Proyectos / Articulos reales:");
+                foreach (var it in items)
+                {
+                    sb.AppendLine($"- {it.Element("title")?.Value}");
+                    sb.AppendLine($"  {it.Element("link")?.Value}");
+                }
+                proyectos = sb.ToString();
+            }
+        }
+        catch { }
+        return $"MODO ARQUITECTO:\n\n{explicacion}{proyectos}";
+    }
+    catch (Exception ex) { return $"Error en modo arquitecto: {ex.Message}"; }
+}
+
+async Task<string> PreguntarGroq(List<object> historialChat, bool modoArquitecto)
 {
     try
     {
         using var http = new HttpClient();
         http.DefaultRequestHeaders.Add("Authorization", $"Bearer {groqKey}");
+        string systemPrompt;
+        if (modoArquitecto)
+        {
+            systemPrompt = "Eres ESPACIONITRO en MODO ARQUITECTO. Eres un arquitecto experto, con conocimiento de historia de la arquitectura, estilos, materiales, estructuras, luz, paisaje, normativa chilena, y referentes como Le Corbusier, Zaha Hadid, Smiljan Radic, Alejandro Aravena, Elemental. Explica con claridad, con ejemplos reales, medidas cuando corresponda, y da ideas de diseño concretas. Habla español neutro, normal, sin modismos chilenos forzados. Nunca uses ** ni markdown, solo texto plano.";
+        }
+        else
+        {
+            systemPrompt = "Eres ESPACIONITRO. Habla español neutro, claro, natural y con sentido. Prohibido usar modismos chilenos forzados como bacán, po, cachai, al tiro, weon o similares. No hables como caricatura. Habla como una persona normal, educada y amable. Sigue la conversación, recuerda lo que el usuario te dijo antes. Si te preguntan por un partido, clima, contingencia o noticia en vivo, di que use los comandos /partido, /clima, /contingencia, /actualidad o /nasa, porque tu no tienes internet en vivo, esos comandos si lo buscan. Nunca uses ** ni markdown, solo texto plano.";
+        }
         var messages = new List<object>
         {
-            new { role = "system", content = "Eres ESPACIONITRO. Habla español neutro, claro, natural y con sentido. Prohibido usar modismos chilenos forzados como bacán, po, cachai, al tiro, weon o similares. No hables como caricatura. Habla como una persona normal, educada y amable. Sigue la conversación, recuerda lo que el usuario te dijo antes. Si te preguntan por un partido, clima o noticia en vivo, di que use los comandos /partido, /clima o /nasa, porque tu no tienes internet en vivo, esos comandos si lo buscan. Nunca uses ** ni markdown, solo texto plano." }
+            new { role = "system", content = systemPrompt }
         };
         messages.AddRange(historialChat);
-        var body = new { model = "openai/gpt-oss-20b", messages = messages, temperature = 0.6, max_tokens = 800 };
+        var body = new { model = "openai/gpt-oss-20b", messages = messages, temperature = 0.6, max_tokens = 900 };
         var json = JsonSerializer.Serialize(body);
         var content = new StringContent(json, Encoding.UTF8, "application/json");
         var response = await http.PostAsync("https://api.groq.com/openai/v1/chat/completions", content);
