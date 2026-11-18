@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ESPACIONITRO")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+795c6ddbed0222838d0f207e8d874b593b44e5b6")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+7cb46b1bf6ff26377884d6b7b417f30153dba71c")]
 [assembly: System.Reflection.AssemblyProductAttribute("ESPACIONITRO")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ESPACIONITRO")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

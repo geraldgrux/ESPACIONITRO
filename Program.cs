@@ -251,29 +251,56 @@ Si falta un dato clave, pon [COMPLETAR: ...] y sigue. No inventes superficies, n
         using var groq = new HttpClient();
         groq.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", groqKey);
 
-        var payload = new
+        // FIX GROQ VACIO: 2 intentos, si el primero viene con content null, reintenta con prompt corto
+        for (int intento = 0; intento < 2; intento++)
         {
-            model = "openai/gpt-oss-20b",
-            messages = new[]
+            var promptAUsar = intento == 0 ? systemPrompt : systemPrompt + "\nResponde en máximo 700 palabras, con listas cortas, completa del 1 al 8 sin cortar.";
+            var tokensAUsar = intento == 0 ? 1200 : 1000;
+
+            var payload = new
             {
-                new { role = "system", content = systemPrompt },
-                new { role = "user", content = texto }
-            },
-            temperature = 0.2,
-            max_tokens = 2000
-        };
+                model = "openai/gpt-oss-20b",
+                messages = new[]
+                {
+                    new { role = "system", content = promptAUsar },
+                    new { role = "user", content = texto }
+                },
+                temperature = 0.2,
+                max_tokens = tokensAUsar
+            };
 
-        var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-        var res = await groq.PostAsync("https://api.groq.com/openai/v1/chat/completions", content);
-        var json = await res.Content.ReadAsStringAsync();
-        Console.WriteLine($"GROQ: {res.StatusCode}");
+            var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+            var res = await groq.PostAsync("https://api.groq.com/openai/v1/chat/completions", content);
+            var json = await res.Content.ReadAsStringAsync();
+            Console.WriteLine($"GROQ intento {intento}: {res.StatusCode} len={json.Length}");
 
-        using var doc = JsonDocument.Parse(json);
-        if (!doc.RootElement.TryGetProperty("choices", out var choices)) return "Estoy con problemas con Groq ahora, prueba de nuevo.";
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                if (!doc.RootElement.TryGetProperty("choices", out var choices)) continue;
+                var msg = choices[0].GetProperty("message");
+                string? resp = null;
+                if (msg.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.String)
+                    resp = c.GetString();
 
-        var resp = choices[0].GetProperty("message").GetProperty("content").GetString();
-        if (string.IsNullOrWhiteSpace(resp)) return "No pude armar la respuesta, prueba de nuevo.";
-        return resp;
+                if (string.IsNullOrWhiteSpace(resp) && msg.TryGetProperty("reasoning_content", out var rc) && rc.ValueKind == JsonValueKind.String)
+                    resp = rc.GetString();
+
+                if (!string.IsNullOrWhiteSpace(resp))
+                {
+                    if (resp.Length > 3900) resp = resp.Substring(0, 3900) + "\n\n[Continúa en el próximo mensaje si lo pides]";
+                    return resp;
+                }
+
+                Console.WriteLine($"GROQ VACIO intento {intento}, reintentando...");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"PARSE GROQ FALLO: {ex.Message} json={json.Substring(0, Math.Min(500, json.Length))}");
+            }
+        }
+
+        return "No pude armar la respuesta, prueba de nuevo con una versión más corta, por ejemplo: 'Memoria casa 120 m2 Ñuñoa, resumen'.";
     }
     catch (Exception ex)
     {
