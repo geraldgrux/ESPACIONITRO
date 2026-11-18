@@ -4,10 +4,29 @@ using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using System.Text;
 using System.Text.Json;
+using System.Net;
 
-// --- Variables de Render ---
 var telegramToken = Environment.GetEnvironmentVariable("TELEGRAM_TOKEN") ?? "";
 var groqKey = Environment.GetEnvironmentVariable("GROQ_KEY") ?? "";
+
+// --- MINI SERVIDOR PARA QUE UPTIMEROBOT LO MANTENGA DESPIERTO ---
+var port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
+var listener = new HttpListener();
+listener.Prefixes.Add($"http://*:{port}/");
+listener.Start();
+Console.WriteLine($"Servidor keep-alive en puerto {port}");
+_ = Task.Run(async () =>
+{
+    while (true)
+    {
+        var ctx = await listener.GetContextAsync();
+        var bytes = Encoding.UTF8.GetBytes("ESPACIONITRO esta vivo");
+        ctx.Response.ContentLength64 = bytes.Length;
+        await ctx.Response.OutputStream.WriteAsync(bytes, 0, bytes.Length);
+        ctx.Response.Close();
+    }
+});
+// --- FIN MINI SERVIDOR ---
 
 if (string.IsNullOrEmpty(telegramToken))
 {
@@ -15,12 +34,6 @@ if (string.IsNullOrEmpty(telegramToken))
     return;
 }
 
-if (string.IsNullOrEmpty(groqKey))
-{
-    Console.WriteLine("ERROR: Falta GROQ_KEY en Render");
-}
-
-// --- Bot de Telegram ---
 var bot = new TelegramBotClient(telegramToken);
 var me = await bot.GetMe();
 Console.WriteLine($"Bot conectado: @{me.Username}");
@@ -37,7 +50,6 @@ bot.StartReceiving(
 Console.WriteLine("Bot esperando mensajes...");
 await Task.Delay(-1);
 
-// --- Cuando llega un mensaje ---
 async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken token)
 {
     try
@@ -46,15 +58,12 @@ async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, Cancel
         if (update.Message?.Text is not { } mensaje) return;
 
         var chatId = update.Message.Chat.Id;
-        Console.WriteLine($"Mensaje de {chatId}: {mensaje}");
-
         var respuesta = await PreguntarGroq(mensaje);
-
         await botClient.SendMessage(chatId, respuesta, cancellationToken: token);
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"Error en HandleUpdate: {ex.Message}");
+        Console.WriteLine($"Error: {ex.Message}");
     }
 }
 
@@ -64,7 +73,6 @@ Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, Cancell
     return Task.CompletedTask;
 }
 
-// --- Preguntar a Groq ---
 async Task<string> PreguntarGroq(string preguntaUsuario)
 {
     try
@@ -77,10 +85,10 @@ async Task<string> PreguntarGroq(string preguntaUsuario)
             model = "openai/gpt-oss-20b",
             messages = new[]
             {
-                new { role = "system", content = "Eres ESPACIONITRO, un asistente de buenas vibras en español chileno. Respondes divertido, con humor chileno, buena onda, usas palabras como po, cachai, que raja. Nunca usas ** ni negritas ni markdown, solo texto plano." },
+                new { role = "system", content = "Eres ESPACIONITRO, un asistente buena onda que habla español chileno suave y natural, no como caricatura. Habla normal, claro y entretenido. Usa un modismo chileno solo de vez en cuando, maximo 1 por respuesta, y solo si calza. No termines frases con 'po.' solo. Para poemas y cosas serias, habla bonito y poetico sin modismos. Nunca uses ** ni negritas ni markdown, solo texto plano." },
                 new { role = "user", content = preguntaUsuario }
             },
-            temperature = 0.8,
+            temperature = 0.7,
             max_tokens = 800
         };
 
@@ -90,11 +98,9 @@ async Task<string> PreguntarGroq(string preguntaUsuario)
         var response = await http.PostAsync("https://api.groq.com/openai/v1/chat/completions", content);
         var textoRespuesta = await response.Content.ReadAsStringAsync();
 
-        Console.WriteLine($"Respuesta Groq: {textoRespuesta}");
-
         if (!response.IsSuccessStatusCode)
         {
-            return $"Groq falló: {response.StatusCode} - {textoRespuesta}";
+            return $"Groq fallo: {response.StatusCode}";
         }
 
         using var doc = JsonDocument.Parse(textoRespuesta);
@@ -104,20 +110,11 @@ async Task<string> PreguntarGroq(string preguntaUsuario)
             .GetProperty("content")
             .GetString() ?? "Sin respuesta";
 
-        // Limpia los ** y markdown que a veces manda Groq
-        respuesta = respuesta
-            .Replace("**", "")
-            .Replace("__", "")
-            .Replace("### ", "")
-            .Replace("## ", "")
-            .Replace("# ", "")
-            .Replace("`", "");
-
+        respuesta = respuesta.Replace("**", "").Replace("__", "").Replace("### ", "").Replace("## ", "").Replace("# ", "").Replace("`", "");
         return respuesta;
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"Error Groq: {ex.Message}");
         return $"Ups, tuve un error: {ex.Message}";
     }
 }
