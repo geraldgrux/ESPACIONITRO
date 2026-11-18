@@ -1,15 +1,21 @@
-﻿using Telegram.Bot;
+﻿using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using Telegram.Bot;
 using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
-using System.Text;
-using System.Text.Json;
-using System.Net;
-using System.Collections.Concurrent;
 
 var telegramToken = Environment.GetEnvironmentVariable("TELEGRAM_TOKEN") ?? "";
 var groqKey = Environment.GetEnvironmentVariable("GROQ_KEY") ?? "";
 
+// --- MINI SERVIDOR KEEP-ALIVE PARA UPTIMEROBOT ---
 var port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
 var listener = new HttpListener();
 listener.Prefixes.Add($"http://*:{port}/");
@@ -27,6 +33,7 @@ _ = Task.Run(async () =>
     }
 });
 
+// --- MEMORIA POR CHAT ---
 var historial = new ConcurrentDictionary<long, List<object>>();
 var bot = new TelegramBotClient(telegramToken);
 var me = await bot.GetMe();
@@ -103,7 +110,6 @@ async Task<string> BuscarPartido(string busqueda)
         using var http = new HttpClient();
         http.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 ESPACIONITRO");
 
-        // Buscamos en 3 días: hoy UTC, ayer y anteayer, porque en Chile es un día menos que UTC
         var fechas = new[]
         {
             DateTime.UtcNow.ToString("yyyyMMdd"),
@@ -147,14 +153,13 @@ async Task<string> BuscarPartido(string busqueda)
                         var ha = GetStr(c, "homeAway");
                         string teamName = "";
                         if (c.TryGetProperty("team", out var team)) teamName = GetStr(team, "displayName");
-                        string score = "";
+                        string score = "?";
                         if (c.TryGetProperty("score", out var sc) && sc.ValueKind == JsonValueKind.String) score = sc.GetString() ?? "?";
                         if (ha == "home") { nombreLocal = teamName; golLocal = score; }
                         if (ha == "away") { nombreVisita = teamName; golVisita = score; }
                     }
                     if (nombreLocal == "?")
                     {
-                        // Si no viene homeAway, tomamos orden 0 y 1
                         var arr = competidores.EnumerateArray().ToList();
                         if (arr.Count >= 2)
                         {
@@ -169,8 +174,9 @@ async Task<string> BuscarPartido(string busqueda)
                     if (comp.TryGetProperty("status", out var st) && st.TryGetProperty("type", out var stType)) estado = GetStr(stType, "description");
                     string liga = "";
                     if (ev.TryGetProperty("league", out var lg)) liga = GetStr(lg, "name");
+                    if (string.IsNullOrEmpty(liga)) liga = "Amistoso Internacional";
 
-                    return $"Resultado en vivo:\n{nombreLocal} {golLocal} - {golVisita} {nombreVisita}\nLiga: {liga}\nEstado: {estado}\nFecha buscada: {fecha}";
+                    return $"Resultado en vivo:\n{nombreLocal} {golLocal} - {golVisita} {nombreVisita}\nLiga: {liga}\nEstado: {estado}";
                 }
                 catch { continue; }
             }
