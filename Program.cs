@@ -9,15 +9,17 @@ var app = builder.Build();
 var telegramToken = Environment.GetEnvironmentVariable("TELEGRAM_TOKEN") ?? "";
 var groqKey = Environment.GetEnvironmentVariable("GROQ_KEY") ?? "";
 
-app.MapGet("/", () => "EspacioNitro Telegram OK - NET10");
+app.MapGet("/", () => "EspacioNitro Telegram OK - NET10 - Arquitectura");
 
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 _ = app.RunAsync($"http://+:{port}");
 
-Console.WriteLine("Bot Telegram iniciado...");
+Console.WriteLine("Bot Telegram iniciado - Modo Arquitectura...");
 
 string cacheDatos = "";
 DateTime cacheHora = DateTime.MinValue;
+string cacheArq = "";
+DateTime cacheArqHora = DateTime.MinValue;
 
 using var http = new HttpClient();
 var offset = 0L;
@@ -59,13 +61,10 @@ while (true)
     }
 }
 
-async Task<string> ObtenerDatosReales()
+async Task<string> ObtenerDatosSantiago()
 {
     if (!string.IsNullOrWhiteSpace(cacheDatos) && (DateTime.UtcNow - cacheHora).TotalMinutes < 15)
-    {
-        Console.WriteLine("DATOS: usando caché");
         return cacheDatos;
-    }
 
     try
     {
@@ -75,17 +74,13 @@ async Task<string> ObtenerDatosReales()
         var sb = new StringBuilder();
         sb.AppendLine($"FECHA HOY: {DateTime.Now:dd/MM/yyyy HH:mm} America/Santiago");
 
-        // 1. CLIMA - Plan A Open-Meteo, Plan B wttr.in
         bool climaOk = false;
         try
         {
             var climaJson = await client.GetStringAsync("https://api.open-meteo.com/v1/forecast?latitude=-33.45&longitude=-70.66&current=temperature_2m,precipitation,wind_speed_10m&timezone=America%2FSantiago");
             using var d = JsonDocument.Parse(climaJson);
             var cur = d.RootElement.GetProperty("current");
-            var temp = cur.GetProperty("temperature_2m").GetDouble();
-            var lluvia = cur.GetProperty("precipitation").GetDouble();
-            var viento = cur.GetProperty("wind_speed_10m").GetDouble();
-            sb.AppendLine($"CLIMA REAL SANTIAGO: {temp}°C, lluvia {lluvia} mm, viento {viento} km/h.");
+            sb.AppendLine($"CLIMA REAL SANTIAGO: {cur.GetProperty("temperature_2m").GetDouble()}°C, lluvia {cur.GetProperty("precipitation").GetDouble()} mm, viento {cur.GetProperty("wind_speed_10m").GetDouble()} km/h.");
             climaOk = true;
         }
         catch (Exception ex) { Console.WriteLine($"CLIMA A FALLO: {ex.Message}"); }
@@ -97,19 +92,16 @@ async Task<string> ObtenerDatosReales()
                 var w = await client.GetStringAsync("https://wttr.in/Santiago?format=j1");
                 using var d = JsonDocument.Parse(w);
                 var cur = d.RootElement.GetProperty("current_condition")[0];
-                var temp = cur.GetProperty("temp_C").GetString();
-                var desc = cur.GetProperty("weatherDesc")[0].GetProperty("value").GetString();
-                sb.AppendLine($"CLIMA REAL SANTIAGO (respaldo): {temp}°C, {desc}.");
+                sb.AppendLine($"CLIMA REAL SANTIAGO (respaldo): {cur.GetProperty("temp_C").GetString()}°C, {cur.GetProperty("weatherDesc")[0].GetProperty("value").GetString()}.");
             }
             catch (Exception ex) { Console.WriteLine($"CLIMA B FALLO: {ex.Message}"); }
         }
 
-        // 2. NOTICIAS - Solo últimas 24 horas
         try
         {
             var rss = await client.GetStringAsync("https://news.google.com/rss/search?q=Santiago%20Chile&hl=es-419&gl=CL&ceid=CL:es-419");
             var items = Regex.Matches(rss, @"<item>(.*?)</item>", RegexOptions.Singleline);
-            sb.AppendLine("NOTICIAS REALES SOLO ULTIMAS 24 HORAS:");
+            sb.AppendLine("NOTICIAS SANTIAGO ULTIMAS 24H:");
             int count = 0;
             foreach (Match item in items)
             {
@@ -118,37 +110,70 @@ async Task<string> ObtenerDatosReales()
                 if (!titleM.Success || !dateM.Success) continue;
                 var titulo = Regex.Replace(titleM.Groups[1].Value, "<.*?>", "").Trim();
                 if (titulo.Contains("Google News")) continue;
-                // Parsear fecha
                 if (DateTime.TryParse(dateM.Groups[1].Value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var fecha))
                 {
-                    var horas = (DateTime.UtcNow - fecha.ToUniversalTime()).TotalHours;
-                    Console.WriteLine($"NOTICIA: {titulo} - hace {horas:F1}h");
-                    if (horas > 24) continue; // descartar vieja
+                    if ((DateTime.UtcNow - fecha.ToUniversalTime()).TotalHours > 24) continue;
                     sb.AppendLine($"- [{fecha:dd/MM HH:mm}] {titulo}");
                     count++;
                     if (count >= 6) break;
                 }
             }
-            if (count == 0) sb.AppendLine("- No hay noticias de las últimas 24h en esta fuente.");
+            if (count == 0) sb.AppendLine("- No hay noticias de las últimas 24h.");
         }
         catch (Exception ex) { Console.WriteLine($"NOTICIAS FALLO: {ex.Message}"); }
 
-        var resultado = sb.ToString();
-        if (!string.IsNullOrWhiteSpace(resultado))
-        {
-            cacheDatos = resultado;
-            cacheHora = DateTime.UtcNow;
-            return resultado;
-        }
+        var r = sb.ToString();
+        if (!string.IsNullOrWhiteSpace(r)) { cacheDatos = r; cacheHora = DateTime.UtcNow; return r; }
+        return cacheDatos != "" ? cacheDatos : "Sin datos reales.";
+    }
+    catch { return cacheDatos != "" ? cacheDatos : "Sin datos reales."; }
+}
 
-        if (!string.IsNullOrWhiteSpace(cacheDatos)) return cacheDatos;
-        return "Sin datos reales disponibles en este momento.";
-    }
-    catch
+async Task<string> ObtenerNoticiasArquitectura()
+{
+    if (!string.IsNullOrWhiteSpace(cacheArq) && (DateTime.UtcNow - cacheArqHora).TotalMinutes < 60)
+        return cacheArq;
+
+    try
     {
-        if (!string.IsNullOrWhiteSpace(cacheDatos)) return cacheDatos;
-        return "Sin datos reales disponibles en este momento.";
+        using var client = new HttpClient();
+        client.Timeout = TimeSpan.FromSeconds(8);
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 EspacioNitroBot");
+        var sb = new StringBuilder();
+        sb.AppendLine("NOTICIAS ARQUITECTURA CHILE ULTIMAS 48H:");
+
+        var queries = new[] { "arquitectura Chile", "MINVU Chile", "OGUC Chile", "Colegio de Arquitectos Chile", "concurso arquitectura Chile" };
+        foreach (var q in queries)
+        {
+            try
+            {
+                var url = $"https://news.google.com/rss/search?q={Uri.EscapeDataString(q)}&hl=es-419&gl=CL&ceid=CL:es-419";
+                var rss = await client.GetStringAsync(url);
+                var items = Regex.Matches(rss, @"<item>(.*?)</item>", RegexOptions.Singleline);
+                int c = 0;
+                foreach (Match item in items)
+                {
+                    var titleM = Regex.Match(item.Value, @"<title>(.*?)</title>");
+                    var dateM = Regex.Match(item.Value, @"<pubDate>(.*?)</pubDate>");
+                    if (!titleM.Success || !dateM.Success) continue;
+                    var titulo = Regex.Replace(titleM.Groups[1].Value, "<.*?>", "").Trim();
+                    if (titulo.Contains("Google News")) continue;
+                    if (DateTime.TryParse(dateM.Groups[1].Value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var fecha))
+                    {
+                        if ((DateTime.UtcNow - fecha.ToUniversalTime()).TotalHours > 48) continue;
+                        sb.AppendLine($"- [{fecha:dd/MM HH:mm}] {titulo}");
+                        c++;
+                        if (c >= 2) break;
+                    }
+                }
+            }
+            catch { }
+        }
+        var r = sb.ToString();
+        cacheArq = r; cacheArqHora = DateTime.UtcNow;
+        return r;
     }
+    catch { return cacheArq; }
 }
 
 async Task<string> ResponderConGroq(string texto)
@@ -156,22 +181,35 @@ async Task<string> ResponderConGroq(string texto)
     try
     {
         var lower = texto.ToLower();
-        bool preguntaDatos = lower.Contains("santiago") || lower.Contains("paso hoy") || lower.Contains("noticia") || lower.Contains("clima") || lower.Contains("tiempo") || lower.Contains("metro") || lower.Contains("trafico") || lower.Contains("tráfico") || lower.Contains("contingencia") || lower.Contains("lluvia");
+        bool esSantiago = lower.Contains("santiago") || lower.Contains("paso hoy") || lower.Contains("clima") || lower.Contains("tiempo") || lower.Contains("metro") || lower.Contains("lluvia");
+        bool esArqNoticias = lower.Contains("arquitectura") || lower.Contains("minvu") || lower.Contains("oguc") || lower.Contains("colegio de arquitectos") || lower.Contains("concurso") || lower.Contains("noticia") && lower.Contains("arquitect");
+        bool esNormativa = lower.Contains("oguc") || lower.Contains("lguc") || lower.Contains("permiso") || lower.Contains("anteproyecto") || lower.Contains("recepcion") || lower.Contains("recepción") || lower.Contains("dom") || lower.Contains("normativa") || lower.Contains("articulo") || lower.Contains("artículo");
+        bool esTrabajo = lower.Contains("memoria") || lower.Contains("carta") || lower.Contains("expediente") || lower.Contains("presupuesto") || lower.Contains("especificacion") || lower.Contains("especificación") || lower.Contains("redacta") || lower.Contains("checklist") || lower.Contains("informe");
 
         string systemPrompt;
-        if (preguntaDatos)
+        string datosExtra = "";
+
+        if (esArqNoticias || lower.Contains("noticias arquitectura"))
         {
-            var datosReales = await ObtenerDatosReales();
-            Console.WriteLine($"DATOS: {datosReales}");
-            if (datosReales.Contains("Sin datos reales"))
-            {
-                return "No pude traer los datos en vivo justo ahora (las fuentes están con límite), prueba de nuevo en 2 minutos.";
-            }
-            systemPrompt = $"Eres EspacioNitro, bot de Telegram en Chile. Responde corto, claro y en español chileno. REGLA OBLIGATORIA: Solo usa las NOTICIAS que dicen 'ULTIMAS 24 HORAS' y el CLIMA REAL de abajo. No uses noticias viejas. Si no hay noticias de hoy, dilo y solo da el clima. No inventes Metro ni tráfico. DATOS REALES:\n{datosReales}";
+            datosExtra = await ObtenerNoticiasArquitectura();
+            systemPrompt = $"Eres EspacioNitro, asistente de arquitectura en Chile. Eres arquitecto chileno con experiencia en OGUC, LGUC, MINVU y DOM. Responde corto, claro, en español chileno, con criterio profesional. REGLA: Solo usa las noticias reales de abajo para noticias. No inventes concursos ni cambios de norma. Si no hay noticia, dilo. DATOS:\n{datosExtra}";
+        }
+        else if (esNormativa)
+        {
+            systemPrompt = "Eres EspacioNitro, asistente de arquitectura en Chile. Eres arquitecto chileno experto en OGUC, LGUC y trámites DOM. REGLA OBLIGATORIA: Nunca inventes números de artículos, ni plazos, ni documentos. Si no estás 100% seguro del artículo exacto, dilo: 'No tengo la fuente confirmada, verifica en OGUC / consulta en la DOM'. Explica el criterio general, el procedimiento y qué revisar, no el artículo inventado. Termina siempre con: 'Verifica con la DOM / PRC de tu comuna, esto es orientación, no reemplaza la norma'. Responde estructurado y práctico.";
+        }
+        else if (esTrabajo)
+        {
+            systemPrompt = "Eres EspacioNitro, asistente de arquitectura en Chile. Ayudas a redactar documentos profesionales: memoria de proyecto, carta a DOM, expediente de permiso, checklist, especificaciones, presupuestos. Usa formato profesional chileno, claro, sin florituras. Si te piden redactar, entrega el documento listo para copiar, con [corchetes] para los datos que faltan. Si te piden checklist, entrega checklist con casillas. Pregunta solo lo esencial si falta un dato clave.";
+        }
+        else if (esSantiago)
+        {
+            datosExtra = await ObtenerDatosSantiago();
+            systemPrompt = $"Eres EspacioNitro, bot de Telegram en Chile. Responde corto, claro y en español chileno. REGLA: Solo usa DATOS REALES de abajo. No inventes Metro ni tráfico. DATOS:\n{datosExtra}";
         }
         else
         {
-            systemPrompt = "Eres EspacioNitro, bot de Telegram en Chile. Responde corto, claro y en español chileno. Eres amable y conversacional.";
+            systemPrompt = "Eres EspacioNitro, asistente de arquitectura en Chile y bot de Telegram. Responde corto, claro y en español chileno. Eres amable, profesional, con criterio de arquitecto. Si el usuario habla de arquitectura, responde como arquitecto chileno.";
         }
 
         using var groq = new HttpClient();
@@ -186,7 +224,7 @@ async Task<string> ResponderConGroq(string texto)
                 new { role = "user", content = texto }
             },
             temperature = 0.2,
-            max_tokens = 500
+            max_tokens = 800
         };
 
         var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
@@ -195,20 +233,15 @@ async Task<string> ResponderConGroq(string texto)
         Console.WriteLine($"GROQ: {res.StatusCode}");
 
         using var doc = JsonDocument.Parse(json);
-
-        if (!doc.RootElement.TryGetProperty("choices", out var choices))
-        {
-            Console.WriteLine($"GROQ RESPUESTA RARA: {json}");
-            return "Estoy con problemas con Groq ahora, prueba de nuevo en un momento.";
-        }
+        if (!doc.RootElement.TryGetProperty("choices", out var choices)) return "Estoy con problemas con Groq ahora, prueba de nuevo.";
 
         var resp = choices[0].GetProperty("message").GetProperty("content").GetString();
-        if (string.IsNullOrWhiteSpace(resp)) return "No pude armar la respuesta, prueba de nuevo con '¿Qué pasó hoy en Santiago?'";
+        if (string.IsNullOrWhiteSpace(resp)) return "No pude armar la respuesta, prueba de nuevo.";
         return resp;
     }
     catch (Exception ex)
     {
         Console.WriteLine($"ERROR GROQ: {ex.Message}");
-        return "Estoy con problemas para conectar, prueba de nuevo en un momento.";
+        return "Estoy con problemas para conectar, prueba de nuevo.";
     }
 }
