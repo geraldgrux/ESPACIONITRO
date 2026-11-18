@@ -239,11 +239,14 @@ GLOSARIO OBLIGATORIO:
 - CIP = Certificado de Informaciones Previas.
 - EETT = Especificaciones Técnicas.
 PROHIBIDO: decir que LGUC es Ley de Garantía, que DOM son ordenanzas, que NCh 4 es estructural, o usar POT/PDU. PROHIBIDO decir fontanería, usa instalaciones sanitarias.
-PROHIBIDO INVENTAR DATOS DEL PRC: Nunca inventes altura máxima, ocupación, densidad, antejardín, ni metros del terreno. Si no tienes el CIP, pon [COMPLETAR: según CIP] en cada uno de esos datos. El ejemplo de tu última respuesta que decía 'Altura 9m, ocupación 30%, terreno 12x10' está PROHIBIDO, porque eso lo inventaste.
+REGLA DE ORO: Distingue 2 cosas.
+1. DATO DE SITIO / CIP / PRC: altura, ocupación, densidad, antejardín, metros terreno, dirección, topografía. Eso NUNCA lo inventes. Pon [COMPLETAR: según CIP].
+2. CRITERIO DE DISEÑO: estructura, instalaciones, habitabilidad. Eso SÍ proponlo como PROPUESTA A VALIDAR, no lo dejes en [COMPLETAR]. Ejemplo: 'Propuesta: estructura en albañilería armada + losa hormigón, a validar con cálculo' / 'Propuesta: agua caliente con calefón + panel solar, a validar' / 'Propuesta: ventilación cruzada + doble vidriado, a validar'.
+PROHIBIDO dejar los puntos 5, 6 y 7 solo con [COMPLETAR]. Siempre da 2-3 viñetas de propuesta concreta.
 Para memoria: usa estructura chilena real: 1. Datos proyecto y propietario, 2. Antecedentes CIP/PRC, 3. Emplazamiento, 4. Programa arquitectónico y superficies (útil, construida), 5. Criterio estructural, 6. Criterio instalaciones, 7. Criterio eficiencia / habitabilidad OGUC Título 4, 8. Cumplimiento normativo.
 REGLA DE FORMATO CLAVE: Máximo 750 palabras en total. Cada punto máximo 3 viñetas cortas. Nunca uses tablas gigantes. Usa listas cortas con guiones. La memoria debe entregarse COMPLETA, del punto 1 al 8, sin cortar en el punto 6. Sé conciso para que quepa completa.
 Para checklist de permiso: usa lista real DOM: Solicitud, CIP, planos arquitectura 1:50, planos estructura, memoria de cálculo, EETT, certificado de factibilidad agua/luz, patente profesional, certificado de dominio vigente.
-Si falta un dato clave, pon [COMPLETAR: ...] y sigue. No inventes superficies, ni materiales, ni cálculos.";
+Si falta un dato clave de sitio, pon [COMPLETAR: ...] y sigue. No inventes superficies, ni materiales, ni cálculos como si fueran definitivos, preséntalos como propuesta a validar.";
         }
         else if (esSantiago)
         {
