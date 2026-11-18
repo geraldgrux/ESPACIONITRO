@@ -1,6 +1,7 @@
 ﻿using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Globalization;
 
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
@@ -15,7 +16,6 @@ _ = app.RunAsync($"http://+:{port}");
 
 Console.WriteLine("Bot Telegram iniciado...");
 
-// CACHE para no saturar las APIs - 15 minutos
 string cacheDatos = "";
 DateTime cacheHora = DateTime.MinValue;
 
@@ -61,7 +61,6 @@ while (true)
 
 async Task<string> ObtenerDatosReales()
 {
-    // Si el caché tiene menos de 15 min, lo reusamos
     if (!string.IsNullOrWhiteSpace(cacheDatos) && (DateTime.UtcNow - cacheHora).TotalMinutes < 15)
     {
         Console.WriteLine("DATOS: usando caché");
@@ -74,8 +73,10 @@ async Task<string> ObtenerDatosReales()
         client.Timeout = TimeSpan.FromSeconds(8);
         client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 EspacioNitroBot");
         var sb = new StringBuilder();
+        sb.AppendLine($"FECHA HOY: {DateTime.Now:dd/MM/yyyy HH:mm} America/Santiago");
 
-        // 1. CLIMA REAL SANTIAGO - Open-Meteo
+        // 1. CLIMA - Plan A Open-Meteo, Plan B wttr.in
+        bool climaOk = false;
         try
         {
             var climaJson = await client.GetStringAsync("https://api.open-meteo.com/v1/forecast?latitude=-33.45&longitude=-70.66&current=temperature_2m,precipitation,wind_speed_10m&timezone=America%2FSantiago");
@@ -84,18 +85,51 @@ async Task<string> ObtenerDatosReales()
             var temp = cur.GetProperty("temperature_2m").GetDouble();
             var lluvia = cur.GetProperty("precipitation").GetDouble();
             var viento = cur.GetProperty("wind_speed_10m").GetDouble();
-            var hora = cur.GetProperty("time").GetString();
-            sb.AppendLine($"CLIMA REAL SANTIAGO a las {hora}: {temp}°C, lluvia {lluvia} mm, viento {viento} km/h.");
+            sb.AppendLine($"CLIMA REAL SANTIAGO: {temp}°C, lluvia {lluvia} mm, viento {viento} km/h.");
+            climaOk = true;
         }
-        catch (Exception ex) { Console.WriteLine($"CLIMA FALLO: {ex.Message}"); }
+        catch (Exception ex) { Console.WriteLine($"CLIMA A FALLO: {ex.Message}"); }
 
-        // 2. NOTICIAS REALES - Google News RSS Chile (no falla con 404)
+        if (!climaOk)
+        {
+            try
+            {
+                var w = await client.GetStringAsync("https://wttr.in/Santiago?format=j1");
+                using var d = JsonDocument.Parse(w);
+                var cur = d.RootElement.GetProperty("current_condition")[0];
+                var temp = cur.GetProperty("temp_C").GetString();
+                var desc = cur.GetProperty("weatherDesc")[0].GetProperty("value").GetString();
+                sb.AppendLine($"CLIMA REAL SANTIAGO (respaldo): {temp}°C, {desc}.");
+            }
+            catch (Exception ex) { Console.WriteLine($"CLIMA B FALLO: {ex.Message}"); }
+        }
+
+        // 2. NOTICIAS - Solo últimas 24 horas
         try
         {
             var rss = await client.GetStringAsync("https://news.google.com/rss/search?q=Santiago%20Chile&hl=es-419&gl=CL&ceid=CL:es-419");
-            var titulos = Regex.Matches(rss, @"<title>(.*?)</title>").Take(9).Select(m => Regex.Replace(m.Groups[1].Value, "<.*?>", "").Trim()).Where(t => t.Length > 10 && !t.Contains("Google News")).ToList();
-            sb.AppendLine("NOTICIAS REALES DE HOY (Google News Chile):");
-            foreach (var t in titulos) sb.AppendLine($"- {t}");
+            var items = Regex.Matches(rss, @"<item>(.*?)</item>", RegexOptions.Singleline);
+            sb.AppendLine("NOTICIAS REALES SOLO ULTIMAS 24 HORAS:");
+            int count = 0;
+            foreach (Match item in items)
+            {
+                var titleM = Regex.Match(item.Value, @"<title>(.*?)</title>");
+                var dateM = Regex.Match(item.Value, @"<pubDate>(.*?)</pubDate>");
+                if (!titleM.Success || !dateM.Success) continue;
+                var titulo = Regex.Replace(titleM.Groups[1].Value, "<.*?>", "").Trim();
+                if (titulo.Contains("Google News")) continue;
+                // Parsear fecha
+                if (DateTime.TryParse(dateM.Groups[1].Value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var fecha))
+                {
+                    var horas = (DateTime.UtcNow - fecha.ToUniversalTime()).TotalHours;
+                    Console.WriteLine($"NOTICIA: {titulo} - hace {horas:F1}h");
+                    if (horas > 24) continue; // descartar vieja
+                    sb.AppendLine($"- [{fecha:dd/MM HH:mm}] {titulo}");
+                    count++;
+                    if (count >= 6) break;
+                }
+            }
+            if (count == 0) sb.AppendLine("- No hay noticias de las últimas 24h en esta fuente.");
         }
         catch (Exception ex) { Console.WriteLine($"NOTICIAS FALLO: {ex.Message}"); }
 
@@ -131,9 +165,9 @@ async Task<string> ResponderConGroq(string texto)
             Console.WriteLine($"DATOS: {datosReales}");
             if (datosReales.Contains("Sin datos reales"))
             {
-                return "No pude traer los datos en vivo justo ahora (las fuentes están con límite), prueba de nuevo en 2 minutos. El bot sigue funcionando para conversar normal.";
+                return "No pude traer los datos en vivo justo ahora (las fuentes están con límite), prueba de nuevo en 2 minutos.";
             }
-            systemPrompt = $"Eres EspacioNitro, bot de Telegram en Chile. Responde corto, claro y en español chileno. REGLA: Solo usa los DATOS REALES de abajo. No inventes Metro ni tráfico. Si un dato no está, di 'no hay info confirmada sobre eso'. DATOS REALES:\n{datosReales}";
+            systemPrompt = $"Eres EspacioNitro, bot de Telegram en Chile. Responde corto, claro y en español chileno. REGLA OBLIGATORIA: Solo usa las NOTICIAS que dicen 'ULTIMAS 24 HORAS' y el CLIMA REAL de abajo. No uses noticias viejas. Si no hay noticias de hoy, dilo y solo da el clima. No inventes Metro ni tráfico. DATOS REALES:\n{datosReales}";
         }
         else
         {
@@ -151,7 +185,7 @@ async Task<string> ResponderConGroq(string texto)
                 new { role = "system", content = systemPrompt },
                 new { role = "user", content = texto }
             },
-            temperature = 0.3,
+            temperature = 0.2,
             max_tokens = 500
         };
 
