@@ -48,10 +48,21 @@ while (true)
             var respuesta = await ResponderConGroq(texto);
             if (string.IsNullOrWhiteSpace(respuesta)) respuesta = "Estoy con problemas para traer los datos en vivo ahora, prueba de nuevo en un momento.";
 
-            var payload = new { chat_id = chatId, text = respuesta };
-            var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-            var send = await http.PostAsync($"https://api.telegram.org/bot{telegramToken}/sendMessage", content);
-            Console.WriteLine($"RESPONDIDO A {chatId} - Telegram: {send.StatusCode}");
+            // FIX CORTE TELEGRAM: partir en trozos de 3800 y mandar en orden, no truncar
+            var trozos = new List<string>();
+            for (int i = 0; i < respuesta.Length; i += 3800)
+            {
+                trozos.Add(respuesta.Substring(i, Math.Min(3800, respuesta.Length - i)));
+            }
+            for (int t = 0; t < trozos.Count; t++)
+            {
+                var txtEnviar = trozos.Count > 1 ? $"[Parte {t + 1}/{trozos.Count}]\n{trozos[t]}" : trozos[t];
+                var payload = new { chat_id = chatId, text = txtEnviar };
+                var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+                var send = await http.PostAsync($"https://api.telegram.org/bot{telegramToken}/sendMessage", content);
+                Console.WriteLine($"RESPONDIDO A {chatId} parte {t + 1}/{trozos.Count} - Telegram: {send.StatusCode}");
+                if (trozos.Count > 1) await Task.Delay(500);
+            }
         }
     }
     catch (Exception ex)
@@ -228,8 +239,9 @@ GLOSARIO OBLIGATORIO:
 - CIP = Certificado de Informaciones Previas.
 - EETT = Especificaciones Técnicas.
 PROHIBIDO: decir que LGUC es Ley de Garantía, que DOM son ordenanzas, que NCh 4 es estructural, o usar POT/PDU. PROHIBIDO decir fontanería, usa instalaciones sanitarias.
+PROHIBIDO INVENTAR DATOS DEL PRC: Nunca inventes altura máxima, ocupación, densidad, antejardín, ni metros del terreno. Si no tienes el CIP, pon [COMPLETAR: según CIP] en cada uno de esos datos. El ejemplo de tu última respuesta que decía 'Altura 9m, ocupación 30%, terreno 12x10' está PROHIBIDO, porque eso lo inventaste.
 Para memoria: usa estructura chilena real: 1. Datos proyecto y propietario, 2. Antecedentes CIP/PRC, 3. Emplazamiento, 4. Programa arquitectónico y superficies (útil, construida), 5. Criterio estructural, 6. Criterio instalaciones, 7. Criterio eficiencia / habitabilidad OGUC Título 4, 8. Cumplimiento normativo.
-REGLA DE FORMATO: Nunca uses tablas gigantes que corten la respuesta. Usa listas cortas con guiones. La memoria debe entregarse COMPLETA, del punto 1 al 8, sin cortar en el punto 3. Si es larga, sé conciso pero completa todos los puntos.
+REGLA DE FORMATO CLAVE: Máximo 750 palabras en total. Cada punto máximo 3 viñetas cortas. Nunca uses tablas gigantes. Usa listas cortas con guiones. La memoria debe entregarse COMPLETA, del punto 1 al 8, sin cortar en el punto 6. Sé conciso para que quepa completa.
 Para checklist de permiso: usa lista real DOM: Solicitud, CIP, planos arquitectura 1:50, planos estructura, memoria de cálculo, EETT, certificado de factibilidad agua/luz, patente profesional, certificado de dominio vigente.
 Si falta un dato clave, pon [COMPLETAR: ...] y sigue. No inventes superficies, ni materiales, ni cálculos.";
         }
@@ -251,11 +263,10 @@ Si falta un dato clave, pon [COMPLETAR: ...] y sigue. No inventes superficies, n
         using var groq = new HttpClient();
         groq.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", groqKey);
 
-        // FIX GROQ VACIO: 2 intentos, si el primero viene con content null, reintenta con prompt corto
         for (int intento = 0; intento < 2; intento++)
         {
             var promptAUsar = intento == 0 ? systemPrompt : systemPrompt + "\nResponde en máximo 700 palabras, con listas cortas, completa del 1 al 8 sin cortar.";
-            var tokensAUsar = intento == 0 ? 1200 : 1000;
+            var tokensAUsar = intento == 0 ? 2500 : 1200;
 
             var payload = new
             {
@@ -288,7 +299,6 @@ Si falta un dato clave, pon [COMPLETAR: ...] y sigue. No inventes superficies, n
 
                 if (!string.IsNullOrWhiteSpace(resp))
                 {
-                    if (resp.Length > 3900) resp = resp.Substring(0, 3900) + "\n\n[Continúa en el próximo mensaje si lo pides]";
                     return resp;
                 }
 
