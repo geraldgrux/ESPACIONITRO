@@ -1,5 +1,6 @@
 ﻿using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
@@ -53,10 +54,53 @@ while (true)
     }
 }
 
+async Task<string> ObtenerDatosReales()
+{
+    try
+    {
+        using var client = new HttpClient();
+        client.Timeout = TimeSpan.FromSeconds(8);
+        var sb = new StringBuilder();
+
+        // 1. CLIMA REAL SANTIAGO - Open-Meteo
+        try
+        {
+            var climaJson = await client.GetStringAsync("https://api.open-meteo.com/v1/forecast?latitude=-33.45&longitude=-70.66&current=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m&timezone=America%2FSantiago");
+            using var d = JsonDocument.Parse(climaJson);
+            var cur = d.RootElement.GetProperty("current");
+            var temp = cur.GetProperty("temperature_2m").GetDouble();
+            var lluvia = cur.GetProperty("precipitation").GetDouble();
+            var viento = cur.GetProperty("wind_speed_10m").GetDouble();
+            var hora = cur.GetProperty("time").GetString();
+            sb.AppendLine($"CLIMA REAL SANTIAGO a las {hora}: {temp}°C, lluvia {lluvia} mm, viento {viento} km/h.");
+        }
+        catch (Exception ex) { Console.WriteLine($"CLIMA FALLO: {ex.Message}"); }
+
+        // 2. NOTICIAS REALES - RSS BioBio
+        try
+        {
+            var rss = await client.GetStringAsync("https://www.biobiochile.cl/feed/");
+            var titulos = Regex.Matches(rss, @"<title>(.*?)</title>").Take(8).Select(m => Regex.Replace(m.Groups[1].Value, "<.*?>", "").Trim()).Where(t => t.Length > 10 && t != "BioBioChile").ToList();
+            sb.AppendLine("NOTICIAS REALES DE HOY (BioBio):");
+            foreach (var t in titulos) sb.AppendLine($"- {t}");
+        }
+        catch (Exception ex) { Console.WriteLine($"NOTICIAS FALLO: {ex.Message}"); }
+
+        return sb.ToString();
+    }
+    catch
+    {
+        return "Sin datos reales disponibles en este momento.";
+    }
+}
+
 async Task<string> ResponderConGroq(string texto)
 {
     try
     {
+        var datosReales = await ObtenerDatosReales();
+        Console.WriteLine($"DATOS: {datosReales}");
+
         using var groq = new HttpClient();
         groq.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", groqKey);
 
@@ -65,11 +109,11 @@ async Task<string> ResponderConGroq(string texto)
             model = "openai/gpt-oss-20b",
             messages = new[]
             {
-                new { role = "system", content = "Eres EspacioNitro, bot de Telegram en Chile. Responde corto, claro y en español chileno. Si preguntan qué pasó hoy en Santiago, resume contingencia, tránsito, metro y clima." },
+                new { role = "system", content = $"Eres EspacioNitro, bot de Telegram en Chile. Responde corto, claro y en español chileno. REGLA OBLIGATORIA: Solo usa los DATOS REALES de abajo. No inventes contingencia, ni cortes de Metro, ni tráfico, ni clima. Si un dato no está en los datos reales, di 'no hay info confirmada'. DATOS REALES:\n{datosReales}" },
                 new { role = "user", content = texto }
             },
-            temperature = 0.7,
-            max_tokens = 400
+            temperature = 0.3,
+            max_tokens = 500
         };
 
         var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
