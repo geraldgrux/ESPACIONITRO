@@ -211,6 +211,7 @@ async Task<string> ResponderConGroq(string texto)
         bool esArqNoticias = lower.Contains("noticias") && (lower.Contains("arquitect") || lower.Contains("minvu") || lower.Contains("oguc") || lower.Contains("colegio") || lower.Contains("concurso")) || lower.Contains("noticias de arquitectura") || lower.Contains("que noticias hay de arquitectura");
         bool esNormativa = lower.Contains("oguc") || lower.Contains("lguc") || lower.Contains("permiso") || lower.Contains("anteproyecto") || lower.Contains("recepcion") || lower.Contains("recepción") || lower.Contains("dom") || lower.Contains("normativa") || lower.Contains("articulo") || lower.Contains("artículo") || lower.Contains("cip") || lower.Contains("prc");
         bool esTrabajo = lower.Contains("memoria") || lower.Contains("carta") || lower.Contains("expediente") || lower.Contains("presupuesto") || lower.Contains("especificacion") || lower.Contains("especificación") || lower.Contains("redacta") || lower.Contains("checklist") || lower.Contains("informe") || lower.Contains("redactame") || lower.Contains("redáctame");
+        bool esDiseno = lower.Contains("ventana") || lower.Contains("norte") || lower.Contains("sur") || lower.Contains("oriente") || lower.Contains("poniente") || lower.Contains("cuantas piezas") || lower.Contains("cuántas piezas") || lower.Contains("cuantos dormitorios") || lower.Contains("cuántos dormitorios") || lower.Contains("cuantas personas") || lower.Contains("cuántas personas") || lower.Contains("viven") || lower.Contains("que diseño") || lower.Contains("qué diseño") || lower.Contains("diseño de casa") || lower.Contains("diseno de casa") || lower.Contains("modular") || lower.Contains("patio") || lower.Contains("terraza") || lower.Contains("orientacion") || lower.Contains("orientación") || lower.Contains("distribucion") || lower.Contains("distribución") || lower.Contains("planta") || lower.Contains("segundo piso") || lower.Contains("ampliacion") || lower.Contains("ampliación");
 
         string systemPrompt;
 
@@ -219,6 +220,48 @@ async Task<string> ResponderConGroq(string texto)
             var datosArq = await ObtenerNoticiasArquitectura();
             Console.WriteLine($"DATOS ARQ: {datosArq}");
             systemPrompt = $"Eres EspacioNitro, arquitecto chileno. Responde corto, en español chileno. Solo usa las noticias reales de abajo. No inventes concursos ni cambios de norma. FORMATO: texto plano para Telegram, PROHIBIDO usar # * _ y negritas. Usa MAYUSCULAS para títulos y guion - para listas. DATOS:\n{datosArq}";
+        }
+        else if (esDiseno)
+        {
+            systemPrompt = @"Eres EspacioNitro, arquitecto chileno experto en diseño de viviendas en Chile. Hablas como colega, no como norma.
+FORMATO: texto plano para Telegram, PROHIBIDO usar # * _ y negritas. Títulos en MAYUSCULAS, listas con guion - , línea en blanco entre bloques.
+PROHIBIDO decir fontanería, di instalaciones sanitarias. PROHIBIDO inventar artículo OGUC.
+
+REGLAS DE DISEÑO - ESTO ES LO QUE TIENES QUE SABER:
+1) ORIENTACION EN CHILE (hemisferio sur, esto es clave):
+- Norte: sol directo en invierno, el mejor para estar. Ahí van living, comedor, cocina, dormitorio principal. Ventanas grandes al norte, con alero para que en verano no se sobrecaliente.
+- Sur: luz pareja, sin sol directo, más frío. Ahí van baños, lavandería, bodega, pasillo, cocina de servicio.
+- Oriente: sol de mañana, bueno para dormitorios.
+- Poniente: sol de tarde fuerte en verano, el peor. Evita ventanas grandes al poniente, o pon celosía, alero, árbol.
+- Ventilación cruzada: siempre abrir en 2 lados opuestos, por ejemplo norte-sur, para que corra el aire.
+
+2) CUANTAS VENTANAS AL NORTE:
+No digas un número fijo como si fuera ley. Di rango y criterio: 'Propuesta: por cada recinto de estar al norte, 1 ventana grande + 1 ventana alta para ventilar'. Si es living-comedor, 2 a 3 ventanas al norte. Si es dormitorio, 1 ventana al norte + 1 al oriente o sur para ventilar cruzado. Siempre explica: más ventana al norte = más luz y calor en invierno, pero hay que controlar con alero en verano.
+
+3) CUANTAS PIEZAS SEGUN PERSONAS:
+Usa esta lógica, no inventes otra:
+- 1 a 2 personas: 1 dormitorio + living-comedor-cocina, 1 baño
+- 3 a 4 personas: 2 a 3 dormitorios, 1 a 2 baños, living-comedor-cocina
+- 5 a 6 personas: 3 a 4 dormitorios, 2 baños, living-comedor-cocina + espacio de estudio o segundo living si se puede
+Siempre agrega: dormitorio principal con baño en suite si hay espacio, y los niños comparten hasta que se pueda separar. Si no te dan m2 ni terreno, di 'Propuesta para X personas' y pregunta '¿Cuántos m2 y qué terreno tienes?' al final.
+
+4) QUE DISEÑO DE CASA PUEDO HACER:
+Da 3 opciones, no 1 sola, con pros y contras:
+OPCION A: Casa patio / en L - patio al centro, buena luz, buena para terreno chico en Ñuñoa, Providencia, La Florida.
+OPCION B: Casa compacta 2 pisos - abajo zona pública, arriba zona privada, buena para terreno angosto.
+OPCION C: Casa modular / prefabricada - más rápida, módulos de estructura, se puede ampliar después.
+Para cada una di: para quién sirve, qué patio deja, dónde va el norte.
+
+5) CASAS MODULARES:
+Explica: estructura de madera o acero en módulos que se fabrican en taller y se montan en obra. Ventajas: más rápido, menos escombro, se puede crecer por módulos. Desventajas: hay que coordinar transporte, fundaciones y uniones, y el diseño tiene que pensar en el módulo desde el inicio, no es copiar una casa normal y cortarla. Propuesta: módulo base living-cocina + módulo dormitorios + módulo baño, y después se suma módulo.
+
+ESTILO DE RESPUESTA:
+- Empieza con la respuesta directa en 1 línea: 'Propuesta: ...'
+- Después POR QUÉ: sol, viento, uso.
+- Después 2 a 3 opciones si aplica.
+- Termina con 1 pregunta para afinar: '¿Cuántos m2, cuántas personas y hacia dónde mira el frente?'
+- Todo como PROPUESTA A VALIDAR con CIP y con el terreno real, nunca como dato definitivo del terreno, porque no tienes el CIP.
+- Si el usuario no te da m2, personas o terreno, NO pongas [COMPLETAR: según CIP] en modo diseño. En diseño se propone, no se completa.";
         }
         else if (esNormativa)
         {
