@@ -4,114 +4,89 @@ using System.Text.Json;
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
 
-// Variables de Render - Environment
-var verifyToken = Environment.GetEnvironmentVariable("VERIFY_TOKEN") ?? "nitro123";
-var whatsappToken = Environment.GetEnvironmentVariable("WHATSAPP_TOKEN") ?? "";
-var phoneNumberId = Environment.GetEnvironmentVariable("PHONE_NUMBER_ID") ?? "";
+var telegramToken = Environment.GetEnvironmentVariable("TELEGRAM_TOKEN") ?? "";
+var groqKey = Environment.GetEnvironmentVariable("GROQ_KEY") ?? "";
 
-// Para que Render vea que está vivo
-app.MapGet("/", () => "EspacioNitro OK - NET10");
+app.MapGet("/", () => "EspacioNitro Telegram OK - NET10");
 
-// Verificación de Meta - cuando le das Verify en developers.facebook.com
-app.MapGet("/webhook", (HttpRequest req) =>
-{
-    var mode = req.Query["hub.mode"];
-    var token = req.Query["hub.verify_token"];
-    var challenge = req.Query["hub.challenge"];
+// Para que Render lo vea vivo
+var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
+_ = app.RunAsync($"http://+:{port}");
 
-    if (mode == "subscribe" && token == verifyToken)
-    {
-        return Results.Text(challenge, "text/plain");
-    }
-    return Results.Forbid();
-});
+Console.WriteLine("Bot Telegram iniciado...");
 
-// Acá llegan los mensajes de WhatsApp
-app.MapPost("/webhook", async (HttpRequest req) =>
+using var http = new HttpClient();
+var offset = 0L;
+
+while (true)
 {
     try
     {
-        using var reader = new StreamReader(req.Body);
-        var body = await reader.ReadToEndAsync();
-        Console.WriteLine($"WEBHOOK RECIBIDO: {body}");
+        // 1. Pedir mensajes nuevos a Telegram
+        var updatesJson = await http.GetStringAsync(
+            $"https://api.telegram.org/bot{telegramToken}/getUpdates?offset={offset}&timeout=30");
 
-        using var doc = JsonDocument.Parse(body);
-        var root = doc.RootElement;
+        using var doc = JsonDocument.Parse(updatesJson);
+        var updates = doc.RootElement.GetProperty("result");
 
-        var messages = root
-            .GetProperty("entry")[0]
-            .GetProperty("changes")[0]
-            .GetProperty("value")
-            .TryGetProperty("messages", out var msgs) ? msgs : default;
-
-        if (msgs.ValueKind == JsonValueKind.Undefined) return Results.Ok();
-
-        foreach (var msg in msgs.EnumerateArray())
+        foreach (var update in updates.EnumerateArray())
         {
-            var from = msg.GetProperty("from").GetString() ?? "";
-            var text = msg.TryGetProperty("text", out var t)
-                ? t.GetProperty("body").GetString() ?? ""
-                : "";
+            offset = update.GetProperty("update_id").GetInt64() + 1;
 
-            if (string.IsNullOrWhiteSpace(text)) continue;
+            if (!update.TryGetProperty("message", out var msg)) continue;
+            if (!msg.TryGetProperty("text", out var textEl)) continue;
 
-            var respuesta = Responder(text);
-            await EnviarWhatsApp(from, respuesta);
+            var chatId = msg.GetProperty("chat").GetProperty("id").GetInt64();
+            var texto = textEl.GetString() ?? "";
+            Console.WriteLine($"MENSAJE: {texto} de {chatId}");
+
+            // 2. Generar respuesta con Groq
+            var respuesta = await ResponderConGroq(texto);
+
+            // 3. Responder en Telegram
+            var payload = new { chat_id = chatId, text = respuesta };
+            var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+            await http.PostAsync($"https://api.telegram.org/bot{telegramToken}/sendMessage", content);
+            Console.WriteLine($"RESPONDIDO A {chatId}");
         }
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"ERROR WEBHOOK: {ex.Message}");
+        Console.WriteLine($"ERROR: {ex.Message}");
+        await Task.Delay(3000);
     }
-    return Results.Ok();
-});
-
-string Responder(string texto)
-{
-    var t = texto.ToLower();
-
-    if (t.Contains("santiago") || t.Contains("paso hoy") || t.Contains("pasó hoy") || t.Contains("contingencia") || t.Contains("actualidad"))
-    {
-        return "Hoy en Santiago: contingencia activa, revisa las stories de @espacionitro para el resumen del día. ¿Quieres que te avise de algo en particular? Tránsito, metro o clima?";
-    }
-
-    if (t.Contains("hola") || t.Contains("buenas") || t.Contains("hello"))
-    {
-        return "Hola! Soy EspacioNitro. Pregúntame: ¿Qué pasó hoy en Santiago? y te resumo el día.";
-    }
-
-    return $"Te escuché: \"{texto}\". Pregúntame por Santiago y te cuento lo de hoy.";
 }
 
-async Task EnviarWhatsApp(string to, string mensaje)
+async Task<string> ResponderConGroq(string texto)
 {
-    if (string.IsNullOrEmpty(whatsappToken) || string.IsNullOrEmpty(phoneNumberId))
+    try
     {
-        Console.WriteLine("FALTA WHATSAPP_TOKEN o PHONE_NUMBER_ID en Render");
-        return;
+        using var groq = new HttpClient();
+        groq.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", groqKey);
+
+        var payload = new
+        {
+            model = "llama-3.3-70b-versatile",
+            messages = new[]
+            {
+                new { role = "system", content = "Eres EspacioNitro, bot de Telegram en Chile. Responde corto, claro y en español chileno. Si preguntan qué pasó hoy en Santiago, resume contingencia, tránsito, metro y clima." },
+                new { role = "user", content = texto }
+            },
+            temperature = 0.7,
+            max_tokens = 400
+        };
+
+        var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+        var res = await groq.PostAsync("https://api.groq.com/openai/v1/chat/completions", content);
+        var json = await res.Content.ReadAsStringAsync();
+        Console.WriteLine($"GROQ: {res.StatusCode}");
+
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "No pude responder ahora, prueba de nuevo.";
     }
-
-    using var client = new HttpClient();
-    client.DefaultRequestHeaders.Authorization =
-        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", whatsappToken);
-
-    var payload = new
+    catch (Exception ex)
     {
-        messaging_product = "whatsapp",
-        to = to,
-        type = "text",
-        text = new { body = mensaje }
-    };
-
-    var json = JsonSerializer.Serialize(payload);
-    var content = new StringContent(json, Encoding.UTF8, "application/json");
-
-    var res = await client.PostAsync(
-        $"https://graph.facebook.com/v21.0/{phoneNumberId}/messages",
-        content);
-
-    Console.WriteLine($"ENVIADO A {to} - Status: {res.StatusCode}");
+        Console.WriteLine($"ERROR GROQ: {ex.Message}");
+        return "Estoy con problemas para conectar, prueba de nuevo en un momento.";
+    }
 }
-
-var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
-app.Run($"http://+:{port}");
