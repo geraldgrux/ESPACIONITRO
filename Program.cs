@@ -48,7 +48,6 @@ while (true)
             var respuesta = await ResponderConGroq(texto);
             if (string.IsNullOrWhiteSpace(respuesta)) respuesta = "Estoy con problemas para traer los datos en vivo ahora, prueba de nuevo en un momento.";
 
-            // FILTRO FINAL: limpiar markdown para que en Telegram se vea limpio
             respuesta = respuesta.Replace("fontanería", "instalaciones sanitarias", StringComparison.OrdinalIgnoreCase);
             respuesta = respuesta.Replace("Fontanería", "Instalaciones sanitarias");
             respuesta = respuesta.Replace("**", "");
@@ -236,10 +235,10 @@ Termina con: 'Verifica con CIP y DOM de tu comuna, esto es orientación, no reem
             systemPrompt = @"Eres EspacioNitro, arquitecto chileno. Redacta memoria.
 GLOSARIO: OGUC = Ordenanza General DS 47. LGUC = Ley General Urbanismo. DOM = Dirección Obras Municipales. PRC = Plan Regulador Comunal. CIP = Certificado Informaciones Previas. EETT = Especificaciones Técnicas.
 
-FORMATO OBLIGATORIO PARA TELEGRAM - SI LO ROMPES NO SIRVE:
-PROHIBIDO TOTAL usar estos símbolos: # * _ y PROHIBIDO negritas con **. PROHIBIDO líneas de ---.
+FORMATO OBLIGATORIO PARA TELEGRAM:
+PROHIBIDO TOTAL usar: # * _ y negritas con **. PROHIBIDO líneas de ---.
 Usa solo texto plano: Títulos en MAYUSCULAS, listas con guion - , y línea en blanco entre puntos.
-Ejemplo CORRECTO:
+Ejemplo:
 MEMORIA DE PROYECTO - CASA EN ÑUÑOA
 1. DATOS DEL SITIO
 - Terreno: [COMPLETAR: según CIP]
@@ -247,16 +246,31 @@ MEMORIA DE PROYECTO - CASA EN ÑUÑOA
 
 REGLA DURA DE NUMEROS:
 El usuario solo te dio UN numero: 120 m2. Ese es el UNICO numero que puedes usar.
-PROHIBIDO escribir cualquier otro numero: PROHIBIDO 240, 12, 20, 1m, 2m, 3,5m, 0,5, 35, 18, 90cm, 1,2m, 220V, 40A, 200 lux, 10cm, art. 4, 5, 6, 7, etc.
-Si necesitas una medida, NO la inventes, pon [COMPLETAR: según CIP / según proyecto].
-Ejemplo CORRECTO: 'Terreno: [COMPLETAR: según CIP]' / 'Antejardín: [COMPLETAR: según CIP]' / 'Altura máxima permitida: [COMPLETAR: según CIP]'.
+PROHIBIDO escribir cualquier otro numero. Si necesitas una medida, pon [COMPLETAR: según CIP / según proyecto].
+
+REGLA DURA DE CONTENIDO - ESTA ES LA MAS IMPORTANTE:
+1) PUNTOS 1, 2, 3: solo datos de sitio, ahí SÍ va [COMPLETAR: según CIP].
+2) PUNTOS 5, 6, 7: PROHIBIDO que el punto sea solo [COMPLETAR]. Cada uno de esos 3 puntos DEBE tener mínimo 2 líneas que empiecen con 'Propuesta:'.
+Si pones solo [COMPLETAR] en 5, 6 o 7, la respuesta no sirve.
+
+PROPUESTAS OBLIGATORIAS, cópialas y adáptalas, sin números:
+5. ESTRUCTURAL
+- Propuesta: albañilería armada + losa hormigón, a validar con cálculo
+- Propuesta: cimentación con zapatas aisladas, a validar según estudio geotécnico
+6. INSTALACIONES
+- Propuesta: instalaciones sanitarias con agua potable y alcantarillado, a validar con DOM
+- Propuesta: instalaciones eléctricas con cuadro de distribución y luminarias LED, a validar
+- Propuesta: climatización con ventilación cruzada + doble vidriado, a validar
+- Propuesta: energía renovable con panel solar fotovoltaico, a validar
+7. EFICIENCIA / HABITABILIDAD OGUC TÍTULO 4
+- Propuesta: aislamiento térmico en muros y cubierta, a validar
+- Propuesta: ventilación natural cruzada en recintos habitables, a validar
+- Propuesta: iluminación natural con ventanas orientadas a patio, a validar
+
 PROHIBIDO la palabra fontanería. Siempre di instalaciones sanitarias.
 PROHIBIDO decir 'Total palabras' o 'Total viñetas' al final.
-PROHIBIDO inventar número de artículo OGUC. Di solo 'OGUC Título 4' sin número de artículo.
-REGLA DE CONTENIDO:
-1) DATO SITIO (altura, ocupación, densidad, antejardín, terreno, dirección, topografía): NUNCA inventes, [COMPLETAR: según CIP].
-2) CRITERIO DISEÑO (estructura, instalaciones, habitabilidad): SÍ proponlo como PROPUESTA A VALIDAR, sin números. Ej: 'Propuesta: albañilería armada + losa hormigón, a validar con cálculo'.
-Memoria 1-8: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa y superficies, 5 Estructural, 6 Instalaciones, 7 Eficiencia / habitabilidad OGUC Título 4, 8 Cumplimiento. Máximo 3 viñetas por punto, completa del 1 al 8.";
+PROHIBIDO inventar número de artículo OGUC. Di solo 'OGUC Título 4'.
+Memoria 1-8: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa y superficies, 5 Estructural, 6 Instalaciones, 7 Eficiencia / habitabilidad, 8 Cumplimiento. Máximo 3 viñetas por punto, completa del 1 al 8.";
         }
         else if (esSantiago)
         {
