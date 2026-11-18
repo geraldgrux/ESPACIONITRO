@@ -10,10 +10,12 @@ using System.Collections.Concurrent;
 var telegramToken = Environment.GetEnvironmentVariable("TELEGRAM_TOKEN") ?? "";
 var groqKey = Environment.GetEnvironmentVariable("GROQ_KEY") ?? "";
 
+// --- MINI SERVIDOR KEEP-ALIVE PARA UPTIMEROBOT ---
 var port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
 var listener = new HttpListener();
 listener.Prefixes.Add($"http://*:{port}/");
 listener.Start();
+Console.WriteLine($"Servidor keep-alive en puerto {port}");
 _ = Task.Run(async () =>
 {
     while (true)
@@ -26,12 +28,14 @@ _ = Task.Run(async () =>
     }
 });
 
+// --- MEMORIA POR CHAT ---
 var historial = new ConcurrentDictionary<long, List<object>>();
 var bot = new TelegramBotClient(telegramToken);
 var me = await bot.GetMe();
 Console.WriteLine($"Bot conectado: @{me.Username}");
 var cts = new CancellationTokenSource();
 bot.StartReceiving(HandleUpdateAsync, HandleErrorAsync, new ReceiverOptions { AllowedUpdates = { } }, cts.Token);
+Console.WriteLine("Bot esperando mensajes...");
 await Task.Delay(-1);
 
 async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken token)
@@ -94,23 +98,53 @@ async Task<string> BuscarPartido(string busqueda)
     try
     {
         using var http = new HttpClient();
-        // API gratis TheSportsDB
-        var url = $"https://www.thesportsdb.com/api/v1/json/3/searchevents.php?e={Uri.EscapeDataString(busqueda)}";
-        var jsonStr = await http.GetStringAsync(url);
-        using var doc = JsonDocument.Parse(jsonStr);
-        var eventos = doc.RootElement.GetProperty("event");
-        if (eventos.ValueKind != JsonValueKind.Array || eventos.GetArrayLength() == 0)
-            return "No encontré ese partido en la base de datos en vivo. Prueba con /partido Chile_vs_Colombia";
+        http.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 ESPACIONITRO");
+        
+        // ESPN no pide key y no bloquea. Buscamos hoy y ayer
+        var hoy = DateTime.UtcNow.ToString("yyyyMMdd");
+        var ayer = DateTime.UtcNow.AddDays(-1).ToString("yyyyMMdd");
+        
+        foreach (var fecha in new[] { hoy, ayer })
+        {
+            var url = $"https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard?dates={fecha}";
+            var jsonStr = await http.GetStringAsync(url);
+            using var doc = JsonDocument.Parse(jsonStr);
+            
+            if (!doc.RootElement.TryGetProperty("events", out var eventos)) continue;
+            
+            foreach (var ev in eventos.EnumerateArray())
+            {
+                var nombre = ev.GetProperty("name").GetString() ?? "";
+                var partes = busqueda.Replace("_vs_", " ").Replace("_", " ").ToLower().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                var nombreBajo = nombre.ToLower();
+                bool coincide = partes.All(p => nombreBajo.Contains(p));
+                
+                if (!coincide) continue;
 
-        var e = eventos[0];
-        string equipoLocal = e.TryGetProperty("strHomeTeam", out var h) ? h.GetString() ?? "" : "";
-        string equipoVisita = e.TryGetProperty("strAwayTeam", out var a) ? a.GetString() ?? "" : "";
-        string golLocal = e.TryGetProperty("intHomeScore", out var gh) ? gh.GetString() ?? "?" : "?";
-        string golVisita = e.TryGetProperty("intAwayScore", out var ga) ? ga.GetString() ?? "?" : "?";
-        string fecha = e.TryGetProperty("dateEvent", out var d) ? d.GetString() ?? "" : "";
-        string liga = e.TryGetProperty("strLeague", out var l) ? l.GetString() ?? "" : "";
-        string estadio = e.TryGetProperty("strVenue", out var v) ? v.GetString() ?? "" : "";
-        return $"Resultado en vivo / ultimo dato:\n{equipoLocal} {golLocal} - {golVisita} {equipoVisita}\nLiga: {liga}\nFecha: {fecha}\nEstadio: {estadio}";
+                var comp = ev.GetProperty("competitions")[0];
+                var competidores = comp.GetProperty("competitors");
+                // ESPN a veces pone visita primero, ordenamos por homeAway
+                JsonElement local = default, visita = default;
+                foreach (var c in competidores.EnumerateArray())
+                {
+                    var ha = c.GetProperty("homeAway").GetString();
+                    if (ha == "home") local = c;
+                    if (ha == "away") visita = c;
+                }
+                if (local.ValueKind == JsonValueKind.Undefined) local = competidores[0];
+                if (visita.ValueKind == JsonValueKind.Undefined) visita = competidores[1];
+
+                var nombreLocal = local.GetProperty("team").GetProperty("displayName").GetString();
+                var nombreVisita = visita.GetProperty("team").GetProperty("displayName").GetString();
+                var golLocal = local.TryGetProperty("score", out var gl) ? gl.GetString() ?? "?" : "?";
+                var golVisita = visita.TryGetProperty("score", out var gv) ? gv.GetString() ?? "?" : "?";
+                var estado = comp.GetProperty("status").GetProperty("type").GetProperty("description").GetString();
+                var liga = ev.GetProperty("league").GetProperty("name").GetString();
+
+                return $"Resultado en vivo:\n{nombreLocal} {golLocal} - {golVisita} {nombreVisita}\nLiga: {liga}\nEstado: {estado}\nFecha: {fecha}";
+            }
+        }
+        return "No encontré ese partido en hoy ni ayer en ESPN. Prueba con /partido Chile_vs_Colombia";
     }
     catch (Exception ex) { return $"No pude buscar el partido ahora: {ex.Message}"; }
 }
@@ -120,7 +154,6 @@ async Task<string> BuscarClima()
     try
     {
         using var http = new HttpClient();
-        // Open-Meteo gratis, sin key. Santiago
         var url = "https://api.open-meteo.com/v1/forecast?latitude=-33.45&longitude=-70.66&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&timezone=America%2FSantiago";
         var jsonStr = await http.GetStringAsync(url);
         using var doc = JsonDocument.Parse(jsonStr);
