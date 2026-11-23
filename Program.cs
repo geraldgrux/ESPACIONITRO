@@ -2,6 +2,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Globalization;
+using System.Net;
 
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
@@ -20,8 +21,6 @@ string cacheDatos = "";
 DateTime cacheHora = DateTime.MinValue;
 string cacheArq = "";
 DateTime cacheArqHora = DateTime.MinValue;
-string cacheDeporte = "";
-DateTime cacheDeporteHora = DateTime.MinValue;
 
 using var http = new HttpClient();
 var offset = 0L;
@@ -84,6 +83,16 @@ while (true)
     }
 }
 
+string LimpiarTexto(string s)
+{
+    if (string.IsNullOrEmpty(s)) return "";
+    s = WebUtility.HtmlDecode(s);
+    s = WebUtility.HtmlDecode(s);
+    s = Regex.Replace(s, "<.*?>", " ");
+    s = Regex.Replace(s, @"\s+", " ").Trim();
+    return s;
+}
+
 async Task<string> ObtenerDatosSantiago()
 {
     if (!string.IsNullOrWhiteSpace(cacheDatos) && (DateTime.UtcNow - cacheHora).TotalMinutes < 15)
@@ -134,7 +143,7 @@ async Task<string> ObtenerDatosSantiago()
                 var titleM = Regex.Match(item.Value, @"<title>(.*?)</title>");
                 var dateM = Regex.Match(item.Value, @"<pubDate>(.*?)</pubDate>");
                 if (!titleM.Success || !dateM.Success) continue;
-                var titulo = Regex.Replace(titleM.Groups[1].Value, "<.*?>", "").Trim();
+                var titulo = LimpiarTexto(titleM.Groups[1].Value);
                 if (titulo.Contains("Google News")) continue;
                 if (DateTime.TryParse(dateM.Groups[1].Value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var fecha))
                 {
@@ -155,65 +164,8 @@ async Task<string> ObtenerDatosSantiago()
     catch { return cacheDatos != "" ? cacheDatos : "Sin datos reales."; }
 }
 
-async Task<string> ObtenerNoticiasArquitectura()
+async Task<string> ObtenerNoticias(string pregunta, string[] queries, int horas, int porQuery)
 {
-    if (!string.IsNullOrWhiteSpace(cacheArq) && (DateTime.UtcNow - cacheArqHora).TotalMinutes < 60)
-    {
-        Console.WriteLine("DATOS: usando caché Arquitectura");
-        return cacheArq;
-    }
-
-    try
-    {
-        using var client = new HttpClient();
-        client.Timeout = TimeSpan.FromSeconds(8);
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 EspacioNitroBot");
-        var sb = new StringBuilder();
-        sb.AppendLine("NOTICIAS ARQUITECTURA CHILE ULTIMAS 48H:");
-
-        var queries = new[] { "concurso arquitectura Chile", "Colegio de Arquitectos Chile", "premio arquitectura Chile", "proyecto arquitectura Chile", "bienal arquitectura Chile" };
-        foreach (var q in queries)
-        {
-            try
-            {
-                var url = $"https://news.google.com/rss/search?q={Uri.EscapeDataString(q)}&hl=es-419&gl=CL&ceid=CL:es-419";
-                var rss = await client.GetStringAsync(url);
-                var items = Regex.Matches(rss, @"<item>(.*?)</item>", RegexOptions.Singleline);
-                int c = 0;
-                foreach (Match item in items)
-                {
-                    var titleM = Regex.Match(item.Value, @"<title>(.*?)</title>");
-                    var dateM = Regex.Match(item.Value, @"<pubDate>(.*?)</pubDate>");
-                    if (!titleM.Success || !dateM.Success) continue;
-                    var titulo = Regex.Replace(titleM.Groups[1].Value, "<.*?>", "").Trim();
-                    if (titulo.Contains("Google News")) continue;
-                    if (DateTime.TryParse(dateM.Groups[1].Value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var fecha))
-                    {
-                        if ((DateTime.UtcNow - fecha.ToUniversalTime()).TotalHours > 48) continue;
-                        sb.AppendLine($"- [{fecha:dd/MM HH:mm}] {titulo}");
-                        c++;
-                        if (c >= 2) break;
-                    }
-                }
-            }
-            catch { }
-        }
-
-        var r = sb.ToString();
-        cacheArq = r; cacheArqHora = DateTime.UtcNow;
-        return r;
-    }
-    catch { return cacheArq; }
-}
-
-async Task<string> ObtenerDatosDeporte(string pregunta)
-{
-    if (!string.IsNullOrWhiteSpace(cacheDeporte) && (DateTime.UtcNow - cacheDeporteHora).TotalMinutes < 10)
-    {
-        Console.WriteLine("DATOS: usando caché Deporte");
-        return cacheDeporte;
-    }
-
     try
     {
         using var client = new HttpClient();
@@ -221,11 +173,8 @@ async Task<string> ObtenerDatosDeporte(string pregunta)
         client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 EspacioNitroBot");
         var sb = new StringBuilder();
         sb.AppendLine($"FECHA HOY: {DateTime.Now:dd/MM/yyyy HH:mm} America/Santiago");
-        sb.AppendLine($"PREGUNTA DEL USUARIO: {pregunta}");
-        sb.AppendLine("NOTICIAS DEPORTE ULTIMAS 24H - SOLO USAR ESTO, NO INVENTAR:");
-
-        // Busca la pregunta tal cual + búsqueda general de fútbol chileno
-        var queries = new[] { pregunta, "Colo Colo Universidad Católica resultado", "Liga de Primera Chile resultado hoy", "Universidad de Chile resultado" };
+        sb.AppendLine($"PREGUNTA: {pregunta}");
+        sb.AppendLine("TITULARES LIMPIOS:");
         foreach (var q in queries)
         {
             try
@@ -238,26 +187,21 @@ async Task<string> ObtenerDatosDeporte(string pregunta)
                 {
                     var titleM = Regex.Match(item.Value, @"<title>(.*?)</title>");
                     var dateM = Regex.Match(item.Value, @"<pubDate>(.*?)</pubDate>");
-                    var descM = Regex.Match(item.Value, @"<description>(.*?)</description>");
                     if (!titleM.Success || !dateM.Success) continue;
-                    var titulo = Regex.Replace(titleM.Groups[1].Value, "<.*?>", "").Trim();
-                    if (titulo.Contains("Google News")) continue;
+                    var titulo = LimpiarTexto(titleM.Groups[1].Value);
+                    if (titulo.Contains("Google News") || titulo.Length < 10) continue;
                     if (DateTime.TryParse(dateM.Groups[1].Value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var fecha))
                     {
-                        if ((DateTime.UtcNow - fecha.ToUniversalTime()).TotalHours > 24) continue;
-                        var desc = descM.Success ? Regex.Replace(descM.Groups[1].Value, "<.*?>", "").Trim() : "";
-                        sb.AppendLine($"- [{fecha:dd/MM HH:mm}] {titulo} | {desc}");
+                        if ((DateTime.UtcNow - fecha.ToUniversalTime()).TotalHours > horas) continue;
+                        sb.AppendLine($"- [{fecha:dd/MM HH:mm}] {titulo}");
                         c++;
-                        if (c >= 4) break;
+                        if (c >= porQuery) break;
                     }
                 }
             }
             catch { }
         }
-
-        var r = sb.ToString();
-        cacheDeporte = r; cacheDeporteHora = DateTime.UtcNow;
-        return r;
+        return sb.ToString();
     }
     catch { return ""; }
 }
@@ -272,118 +216,56 @@ async Task<string> ResponderConGroq(string texto)
         bool esNormativa = lower.Contains("oguc") || lower.Contains("lguc") || lower.Contains("permiso") || lower.Contains("anteproyecto") || lower.Contains("recepcion") || lower.Contains("recepción") || lower.Contains("dom") || lower.Contains("normativa") || lower.Contains("articulo") || lower.Contains("artículo") || lower.Contains("cip") || lower.Contains("prc");
         bool esTrabajo = lower.Contains("memoria") || lower.Contains("carta") || lower.Contains("expediente") || lower.Contains("presupuesto") || lower.Contains("especificacion") || lower.Contains("especificación") || lower.Contains("redacta") || lower.Contains("checklist") || lower.Contains("informe") || lower.Contains("redactame") || lower.Contains("redáctame");
         bool esDiseno = lower.Contains("ventana") || lower.Contains("norte") || lower.Contains("sur") || lower.Contains("oriente") || lower.Contains("poniente") || lower.Contains("cuantas piezas") || lower.Contains("cuántas piezas") || lower.Contains("cuantos dormitorios") || lower.Contains("cuántos dormitorios") || lower.Contains("cuantas personas") || lower.Contains("cuántas personas") || lower.Contains("viven") || lower.Contains("que diseño") || lower.Contains("qué diseño") || lower.Contains("diseño de casa") || lower.Contains("diseno de casa") || lower.Contains("modular") || lower.Contains("patio") || lower.Contains("terraza") || lower.Contains("orientacion") || lower.Contains("orientación") || lower.Contains("distribucion") || lower.Contains("distribución") || lower.Contains("planta") || lower.Contains("segundo piso") || lower.Contains("ampliacion") || lower.Contains("ampliación");
-        bool esDeporte = lower.Contains("catolica") || lower.Contains("católica") || lower.Contains("colo colo") || lower.Contains("colo-colo") || lower.Contains("la u") || lower.Contains("universidad de chile") || lower.Contains("futbol") || lower.Contains("fútbol") || lower.Contains("partido") || lower.Contains("gano") || lower.Contains("ganó") || lower.Contains("como le fue") || lower.Contains("como le fue") || lower.Contains("resultado") || lower.Contains("marcador") || lower.Contains("gol") || lower.Contains("liga") || lower.Contains("campeonato");
+        bool esDeporte = lower.Contains("catolica") || lower.Contains("católica") || lower.Contains("colo colo") || lower.Contains("colo-colo") || lower.Contains("la u") || lower.Contains("universidad de chile") || lower.Contains("futbol") || lower.Contains("fútbol") || lower.Contains("partido") || lower.Contains("gano") || lower.Contains("ganó") || lower.Contains("como le fue") || lower.Contains("resultado") || lower.Contains("marcador") || lower.Contains("gol") || lower.Contains("liga") || lower.Contains("campeonato");
+
+        // REGLAS, NO RESPUESTAS. El cerebro elabora, el código solo pone límites.
+        string reglas = "REGLAS GENERALES, NO SON RESPUESTAS: 1) Responde SOLO lo preguntado, no agregues temas que no pidió. 2) Todo en español chileno, PROHIBIDO palabras en inglés. 3) Texto plano para Telegram, PROHIBIDO # * _ y negritas, títulos en MAYUSCULAS, listas con guion -. 4) PROHIBIDO inventar datos, marcadores, artículos, plazos o medidas. Si no tienes el dato real, dilo. 5) PROHIBIDO decir fontanería, di instalaciones sanitarias. 6) Elabora tú la respuesta con criterio, no copies una plantilla. ";
 
         string systemPrompt;
 
         if (esDeporte)
         {
-            var datosDep = await ObtenerDatosDeporte(texto);
-            Console.WriteLine($"DATOS DEPORTE: {datosDep}");
-            if (string.IsNullOrWhiteSpace(datosDep) || !datosDep.Contains("Colo") && !datosDep.Contains("Católica") && !datosDep.Contains("Chile") && !datosDep.Contains("U. de"))
+            // Solo traemos titulares limpios, el cerebro los interpreta. No hay respuesta fija en código.
+            var datosDep = await ObtenerNoticias(texto, new[] { texto, "Liga de Primera Chile resultado" }, 24, 4);
+            if (string.IsNullOrWhiteSpace(datosDep) || datosDep.Split('\n').Length < 5)
             {
-                return "No tengo el resultado confirmado en vivo ahora, no te quiero inventar un marcador. Revisa en Cooperativa, TNT Sports o BioBio y en 10 minutos me preguntas de nuevo.";
+                return "No tengo el resultado confirmado en vivo ahora.";
             }
-            systemPrompt = $"Eres EspacioNitro. Responde SOLO con los datos reales de abajo, en español chileno, corto, texto plano para Telegram, PROHIBIDO usar # * _ y negritas. REGLA DURA: PROHIBIDO inventar marcador, goleador, minuto o ganador. Si el dato no está en los datos de abajo, di 'No tengo ese dato confirmado'. No digas 2 resultados distintos. Si el partido ya se jugó, di el marcador una sola vez, claro, y quién hizo los goles solo si está en los datos. DATOS:\n{datosDep}";
+            systemPrompt = reglas + "Eres EspacioNitro. Lee los titulares de abajo y responde SOLO lo preguntado, con lo que ahí dice. Si el marcador no está escrito ahí, di que no lo tienes confirmado. No inventes goleador ni minuto. TITULARES:\n" + datosDep;
         }
         else if (esArqNoticias)
         {
-            var datosArq = await ObtenerNoticiasArquitectura();
-            Console.WriteLine($"DATOS ARQ: {datosArq}");
-            systemPrompt = $"Eres EspacioNitro, arquitecto chileno. Responde corto, en español chileno. Solo usa las noticias reales de abajo. No inventes concursos ni cambios de norma. FORMATO: texto plano para Telegram, PROHIBIDO usar # * _ y negritas. Usa MAYUSCULAS para títulos y guion - para listas. DATOS:\n{datosArq}";
+            var datosArq = await ObtenerNoticias(texto, new[] { "concurso arquitectura Chile", "Colegio de Arquitectos Chile", "premio arquitectura Chile", "proyecto arquitectura Chile" }, 48, 2);
+            systemPrompt = reglas + "Eres EspacioNitro, arquitecto chileno. Usa solo los titulares reales de abajo, elabora tú el resumen. No inventes concursos ni cambios de norma. TITULARES:\n" + datosArq;
         }
         else if (esDiseno)
         {
-            systemPrompt = @"Eres EspacioNitro, arquitecto chileno experto en diseño de viviendas en Chile. Hablas como colega, no como norma.
-TODO EN ESPAÑOL CHILENO. PROHIBIDO TOTAL usar palabras en inglés. PROHIBIDO decir PROPOSAL, OPTIONS, WHY, PRO, CONS. Di siempre: Propuesta, Por qué, Opciones, Pros, Contras.
-FORMATO: texto plano para Telegram, PROHIBIDO usar # * _ y negritas. Títulos en MAYUSCULAS, listas con guion - , línea en blanco entre bloques.
-PROHIBIDO decir fontanería, di instalaciones sanitarias. PROHIBIDO inventar artículo OGUC.
-
-REGLAS DE DISEÑO:
-1) ORIENTACION EN CHILE (hemisferio sur):
-- Norte: sol directo en invierno, el mejor para estar. Ahí van living, comedor, cocina, dormitorio principal. Ventanas grandes al norte, con alero para que en verano no se sobrecaliente.
-- Sur: luz pareja, sin sol directo, más frío. Ahí van baños, lavandería, bodega, pasillo.
-- Oriente: sol de mañana, bueno para dormitorios.
-- Poniente: sol de tarde fuerte en verano, el peor. Evita ventanas grandes al poniente, o pon celosía, alero, árbol.
-- Ventilación cruzada: siempre abrir en 2 lados opuestos, por ejemplo norte-sur.
-
-2) CUANTAS VENTANAS AL NORTE:
-No digas un número fijo como si fuera ley. Di rango y criterio: 'Propuesta: por cada recinto de estar al norte, 1 ventana grande + 1 ventana alta para ventilar'. Si es living-comedor, 2 a 3 ventanas al norte. Si es dormitorio, 1 ventana al norte + 1 al oriente o sur para ventilar cruzado.
-
-3) CUANTAS PIEZAS SEGUN PERSONAS:
-- 1 a 2 personas: 1 dormitorio + living-comedor-cocina, 1 baño
-- 3 a 4 personas: 2 a 3 dormitorios, 1 a 2 baños, living-comedor-cocina
-- 5 a 6 personas: 3 a 4 dormitorios, 2 baños, living-comedor-cocina + espacio de estudio o segundo living si se puede
-
-4) QUE DISEÑO DE CASA PUEDO HACER:
-Da 3 opciones, con pros y contras:
-OPCION A: Casa patio / en L - patio al centro, buena luz, buena para terreno chico en Ñuñoa, Providencia, La Florida.
-OPCION B: Casa compacta 2 pisos - abajo zona pública, arriba zona privada, buena para terreno angosto.
-OPCION C: Casa modular / prefabricada - más rápida, módulos de estructura, se puede ampliar después.
-
-5) CASAS MODULARES:
-Estructura de madera o acero en módulos que se fabrican en taller y se montan en obra. Ventajas: más rápido, menos escombro, se puede crecer por módulos. Desventajas: coordinar transporte, fundaciones y uniones, y el diseño tiene que pensar en el módulo desde el inicio. Propuesta: módulo base living-cocina + módulo dormitorios + módulo baño.
-
-ESTILO:
-- Empieza con: 'Propuesta: ...'
-- Después Por qué: sol, viento, uso.
-- Después 2 a 3 opciones si aplica.
-- Termina con 1 pregunta: '¿Cuántos m2, cuántas personas y hacia dónde mira el frente?'
-- Todo como PROPUESTA A VALIDAR con CIP y con el terreno real.
-- En diseño se propone, no se pone [COMPLETAR: según CIP].";
+            // Criterio, no plantilla. El cerebro decide cuántas, dónde y por qué, según el caso.
+            systemPrompt = reglas + @"Eres EspacioNitro, arquitecto chileno experto en diseño de viviendas en Chile.
+Piensa como arquitecto, no como plantilla. Elabora tú la propuesta según el caso que te den: personas, m2 si te los dan, comuna, orientación del frente si te la dan.
+Criterio que debes usar para razonar, no para copiar:
+- En Chile, hemisferio sur, el norte recibe sol directo en invierno, el sur es más frío y con luz pareja, el oriente sol de mañana, el poniente sol fuerte de tarde en verano.
+- Ventilación cruzada: abrir en 2 lados opuestos.
+- Programa: se arma según cuántas personas viven, su privacidad y su vida diaria, no con una tabla fija.
+- Si te piden opciones, elabora tú 2 o 3 según el terreno, con pros y contras razonados.
+- Si te piden modular, razona tú ventajas y límites: fabricación, transporte, fundaciones, crecimiento.
+- Si no te dan m2, terreno o CIP, propón con criterio y marca que es propuesta a validar con el terreno real, no inventes medidas del sitio.
+- Si te piden 1 cosa, responde 1 cosa. No agregues otra.";
         }
         else if (esNormativa)
         {
-            systemPrompt = @"Eres EspacioNitro, arquitecto chileno experto OGUC, LGUC y DOM.
-OGUC = Ordenanza General de Urbanismo y Construcciones DS 47 MINVU, norma NACIONAL. LGUC = Ley General de Urbanismo y Construcciones. DOM = Dirección de Obras Municipales. PRC = Plan Regulador Comunal. CIP = Certificado de Informaciones Previas, primer documento en DOM. EETT = Especificaciones Técnicas.
-PROHIBIDO: POT, PDU, decir OGUC municipal, decir fontanería (usa instalaciones sanitarias).
-FORMATO: texto plano para Telegram, PROHIBIDO usar # * _ y negritas. Usa MAYUSCULAS para títulos y guion - para listas. Sin líneas de ---.
-Nunca inventes artículo, plazo o documento. Si no estás seguro, di 'verifica en OGUC / CIP / DOM'.
-Permiso: 1. CIP en DOM, 2. Revisar PRC, 3. Proyecto arquitectura + estructura + instalaciones, 4. Expediente: solicitud, planos, memoria, EETT, cálculo, certificados, patente, 5. Ingreso DOM, 6. Aprobación y pago derechos.
-Termina con: 'Verifica con CIP y DOM de tu comuna, esto es orientación, no reemplaza la norma'.";
+            systemPrompt = reglas + @"Eres EspacioNitro, arquitecto chileno experto OGUC, LGUC y DOM.
+Sabes: OGUC es Ordenanza General DS 47 MINVU, norma NACIONAL. LGUC es Ley General de Urbanismo y Construcciones. DOM es Dirección de Obras Municipales. PRC es Plan Regulador Comunal. CIP es Certificado de Informaciones Previas, primer documento en DOM. EETT son Especificaciones Técnicas.
+Elabora tú la explicación según lo preguntado. Nunca inventes número de artículo, plazo o documento. Si no estás seguro, di que verifique en OGUC / CIP / DOM.";
         }
         else if (esTrabajo)
         {
-            systemPrompt = @"Eres EspacioNitro, arquitecto chileno. Redacta memoria.
-GLOSARIO: OGUC = Ordenanza General DS 47. LGUC = Ley General Urbanismo. DOM = Dirección Obras Municipales. PRC = Plan Regulador Comunal. CIP = Certificado Informaciones Previas. EETT = Especificaciones Técnicas.
-
-FORMATO OBLIGATORIO PARA TELEGRAM:
-PROHIBIDO TOTAL usar: # * _ y negritas con **. PROHIBIDO líneas de ---.
-Usa solo texto plano: Títulos en MAYUSCULAS, listas con guion - , y línea en blanco entre puntos.
-Ejemplo:
-MEMORIA DE PROYECTO - CASA EN ÑUÑOA
-1. DATOS DEL SITIO
-- Terreno: [COMPLETAR: según CIP]
-- Altura máxima permitida: [COMPLETAR: según CIP]
-
-REGLA DURA DE NUMEROS:
-El usuario solo te dio UN numero: 120 m2. Ese es el UNICO numero que puedes usar.
-PROHIBIDO escribir cualquier otro numero. Si necesitas una medida, pon [COMPLETAR: según CIP / según proyecto].
-
-REGLA DURA DE CONTENIDO:
-1) PUNTOS 1, 2, 3: solo datos de sitio, ahí SÍ va [COMPLETAR: según CIP]. PROHIBIDO inventar en el 3: prohibido decir 'calle principal', 'calle secundaria', 'zona residencial', 'mediana densidad', 'barrio'. Si no tienes el CIP, el 3 es solo [COMPLETAR: según CIP].
-PUNTO 3 ESPECIAL: si no hay datos, el punto 3 es UNA sola línea: '- Emplazamiento: [COMPLETAR: según CIP]'. PROHIBIDO repetir 3 veces la misma línea de [COMPLETAR].
-2) PUNTO 4: la distribución NO es dato, es propuesta. Debe decir 'Propuesta: sala, comedor, cocina, dormitorios, baños, a validar', no afirmarla como definitiva.
-3) PUNTOS 5, 6, 7: PROHIBIDO que el punto sea solo [COMPLETAR]. Cada uno DEBE tener mínimo 2 líneas que empiecen con 'Propuesta:'.
-
-PROPUESTAS OBLIGATORIAS, cópialas y adáptalas, sin números:
-5. ESTRUCTURAL
-- Propuesta: albañilería armada + losa hormigón, a validar con cálculo
-- Propuesta: cimentación con zapatas aisladas, a validar según estudio geotécnico
-6. INSTALACIONES
-- Propuesta: instalaciones sanitarias con agua potable y alcantarillado, a validar con DOM
-- Propuesta: instalaciones eléctricas con cuadro de distribución y luminarias LED, a validar
-- Propuesta: climatización con ventilación cruzada + doble vidriado, a validar
-- Propuesta: energía renovable con panel solar fotovoltaico, a validar
-7. EFICIENCIA / HABITABILIDAD OGUC TÍTULO 4
-- Propuesta: aislamiento térmico en muros y cubierta, a validar
-- Propuesta: ventilación natural cruzada en recintos habitables, a validar
-- Propuesta: iluminación natural con ventanas orientadas a patio, a validar
-
-PROHIBIDO la palabra fontanería. Siempre di instalaciones sanitarias.
-PROHIBIDO decir 'Total palabras' o 'Total viñetas' al final.
-PROHIBIDO inventar número de artículo OGUC. Di solo 'OGUC Título 4'.
-Memoria 1-8: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa y superficies, 5 Estructural, 6 Instalaciones, 7 Eficiencia / habitabilidad, 8 Cumplimiento. Máximo 3 viñetas por punto, completa del 1 al 8.";
+            systemPrompt = reglas + @"Eres EspacioNitro, arquitecto chileno. Elabora tú el documento que te pidan, por ejemplo memoria, carta, checklist.
+Reglas de estructura, no de contenido: usa los 8 puntos si es memoria: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa, 5 Estructural, 6 Instalaciones, 7 Eficiencia / habitabilidad, 8 Cumplimiento.
+Para datos del sitio que no tienes, usa [COMPLETAR: según CIP], no inventes calle, zona ni medidas.
+Para lo demás, elabora tú la propuesta con criterio y marca 'Propuesta: ... a validar', no afirmes como definitivo lo que no tienes.
+No inventes número de artículo OGUC, di solo OGUC Título 4 si aplica.
+Si el usuario te dio un solo número, por ejemplo 120 m2, ese es el único número del sitio que puedes usar. El resto de medidas, si las propones, deben ser propuestas a validar, no datos del terreno.";
         }
         else if (esSantiago)
         {
@@ -391,13 +273,13 @@ Memoria 1-8: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa y superficies, 5 Es
             Console.WriteLine($"DATOS: {datos}");
             if (datos.Contains("Sin datos reales"))
             {
-                return "No pude traer los datos en vivo justo ahora (las fuentes están con límite), prueba de nuevo en 2 minutos.";
+                return "No pude traer los datos en vivo justo ahora.";
             }
-            systemPrompt = $"Eres EspacioNitro, bot Telegram Chile. Responde corto, español chileno. Solo usa DATOS REALES de abajo. No inventes Metro ni tráfico. FORMATO: texto plano, PROHIBIDO # * _ y negritas, usa MAYUSCULAS para títulos y guion - para listas. DATOS:\n{datos}";
+            systemPrompt = reglas + $"Eres EspacioNitro, bot Telegram Chile. Elabora tú la respuesta con los DATOS REALES de abajo. No inventes Metro ni tráfico. DATOS:\n{datos}";
         }
         else
         {
-            systemPrompt = "Eres EspacioNitro, arquitecto chileno, bot Telegram. Responde corto, español chileno. OGUC nacional DS 47, LGUC Ley General Urbanismo, DOM Dirección Obras Municipales, EETT Especificaciones Técnicas. Nunca POT/PDU. FORMATO: texto plano, PROHIBIDO # * _ y negritas. REGLA DURA: si te preguntan por un partido, resultado, marcador o goleador y no tienes dato real, di que no lo tienes, PROHIBIDO inventar.";
+            systemPrompt = reglas + "Eres EspacioNitro, arquitecto chileno, bot Telegram. Elabora tú la respuesta con criterio de arquitecto chileno. OGUC nacional DS 47, LGUC Ley General Urbanismo, DOM Dirección Obras Municipales, EETT Especificaciones Técnicas.";
         }
 
         using var groq = new HttpClient();
@@ -425,7 +307,7 @@ Memoria 1-8: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa y superficies, 5 Es
                             new { role = "system", content = systemPrompt },
                             new { role = "user", content = texto }
                         },
-                        temperature = 0.1,
+                        temperature = 0.3,
                         max_tokens = it.Tokens
                     };
                 }
@@ -439,7 +321,7 @@ Memoria 1-8: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa y superficies, 5 Es
                             new { role = "system", content = systemPrompt },
                             new { role = "user", content = texto }
                         },
-                        temperature = 0.1,
+                        temperature = 0.3,
                         max_completion_tokens = it.Tokens,
                         reasoning_effort = it.Reasoning
                     };
@@ -468,7 +350,7 @@ Memoria 1-8: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa y superficies, 5 Es
             }
         }
 
-        return "No pude armar la respuesta, prueba de nuevo en 1 minuto. Si sigue, prueba: 'Memoria casa 120 m2 Ñuñoa, resumen'.";
+        return "No pude armar la respuesta, prueba de nuevo en 1 minuto.";
     }
     catch (Exception ex)
     {
