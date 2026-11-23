@@ -19,11 +19,17 @@ Console.WriteLine("Bot Telegram iniciado - Modo Arquitectura...");
 
 string cacheDatos = "";
 DateTime cacheHora = DateTime.MinValue;
-string cacheArq = "";
-DateTime cacheArqHora = DateTime.MinValue;
 
 using var http = new HttpClient();
 var offset = 0L;
+
+// FUENTES VERIDICAS ESTABLECIDAS - NO SON RESPUESTAS, SON DE DONDE SACAR EL DATO
+// El cerebro elabora, pero SOLO con lo que viene de estas fuentes.
+const string FUENTES_DEPORTE = "Cooperativa.cl, BioBioChile.cl, TNTSports.cl, ANFP.cl, ESPN Chile. Si el dato no está ahí, no lo inventes.";
+const string FUENTES_CLIMA = "Open-Meteo y Dirección Meteorológica de Chile (meteochile.gob.cl).";
+const string FUENTES_NORMA = "MINVU, OGUC DS 47 oficial, LGUC, Diario Oficial, DOM de la comuna, CIP. No uses blogs ni foros.";
+const string FUENTES_ARQ = "Colegio de Arquitectos de Chile, MINVU, concursos y premios oficiales, Diario Oficial.";
+const string FUENTES_SANTIAGO = "Cooperativa, BioBioChile, TNT Sports para deporte, Open-Meteo para clima, MINVU / DOM para norma.";
 
 while (true)
 {
@@ -108,6 +114,7 @@ async Task<string> ObtenerDatosSantiago()
         client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 EspacioNitroBot");
         var sb = new StringBuilder();
         sb.AppendLine($"FECHA HOY: {DateTime.Now:dd/MM/yyyy HH:mm} America/Santiago");
+        sb.AppendLine($"FUENTES CLIMA VERIDICAS: {FUENTES_CLIMA}");
 
         bool climaOk = false;
         try
@@ -142,13 +149,15 @@ async Task<string> ObtenerDatosSantiago()
             {
                 var titleM = Regex.Match(item.Value, @"<title>(.*?)</title>");
                 var dateM = Regex.Match(item.Value, @"<pubDate>(.*?)</pubDate>");
+                var descM = Regex.Match(item.Value, @"<description>(.*?)</description>");
                 if (!titleM.Success || !dateM.Success) continue;
                 var titulo = LimpiarTexto(titleM.Groups[1].Value);
+                var desc = descM.Success ? LimpiarTexto(descM.Groups[1].Value) : "";
                 if (titulo.Contains("Google News")) continue;
                 if (DateTime.TryParse(dateM.Groups[1].Value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var fecha))
                 {
                     if ((DateTime.UtcNow - fecha.ToUniversalTime()).TotalHours > 24) continue;
-                    sb.AppendLine($"- [{fecha:dd/MM HH:mm}] {titulo}");
+                    sb.AppendLine($"- [{fecha:dd/MM HH:mm}] {titulo} | {desc}");
                     count++;
                     if (count >= 6) break;
                 }
@@ -174,7 +183,7 @@ async Task<string> ObtenerNoticias(string pregunta, string[] queries, int horas,
         var sb = new StringBuilder();
         sb.AppendLine($"FECHA HOY: {DateTime.Now:dd/MM/yyyy HH:mm} America/Santiago");
         sb.AppendLine($"PREGUNTA: {pregunta}");
-        sb.AppendLine("TITULARES LIMPIOS:");
+        sb.AppendLine("TITULAR + DESCRIPCION LIMPIA - AHI VIENE EL MARCADOR, EL GOLEADOR, EL DETALLE:");
         foreach (var q in queries)
         {
             try
@@ -187,13 +196,17 @@ async Task<string> ObtenerNoticias(string pregunta, string[] queries, int horas,
                 {
                     var titleM = Regex.Match(item.Value, @"<title>(.*?)</title>");
                     var dateM = Regex.Match(item.Value, @"<pubDate>(.*?)</pubDate>");
+                    var descM = Regex.Match(item.Value, @"<description>(.*?)</description>");
                     if (!titleM.Success || !dateM.Success) continue;
                     var titulo = LimpiarTexto(titleM.Groups[1].Value);
+                    var desc = descM.Success ? LimpiarTexto(descM.Groups[1].Value) : "";
+                    // Corta la descripción para que no venga basura, pero deja el dato
+                    if (desc.Length > 300) desc = desc.Substring(0, 300);
                     if (titulo.Contains("Google News") || titulo.Length < 10) continue;
                     if (DateTime.TryParse(dateM.Groups[1].Value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var fecha))
                     {
                         if ((DateTime.UtcNow - fecha.ToUniversalTime()).TotalHours > horas) continue;
-                        sb.AppendLine($"- [{fecha:dd/MM HH:mm}] {titulo}");
+                        sb.AppendLine($"- [{fecha:dd/MM HH:mm}] {titulo} | {desc}");
                         c++;
                         if (c >= porQuery) break;
                     }
@@ -218,54 +231,35 @@ async Task<string> ResponderConGroq(string texto)
         bool esDiseno = lower.Contains("ventana") || lower.Contains("norte") || lower.Contains("sur") || lower.Contains("oriente") || lower.Contains("poniente") || lower.Contains("cuantas piezas") || lower.Contains("cuántas piezas") || lower.Contains("cuantos dormitorios") || lower.Contains("cuántos dormitorios") || lower.Contains("cuantas personas") || lower.Contains("cuántas personas") || lower.Contains("viven") || lower.Contains("que diseño") || lower.Contains("qué diseño") || lower.Contains("diseño de casa") || lower.Contains("diseno de casa") || lower.Contains("modular") || lower.Contains("patio") || lower.Contains("terraza") || lower.Contains("orientacion") || lower.Contains("orientación") || lower.Contains("distribucion") || lower.Contains("distribución") || lower.Contains("planta") || lower.Contains("segundo piso") || lower.Contains("ampliacion") || lower.Contains("ampliación");
         bool esDeporte = lower.Contains("catolica") || lower.Contains("católica") || lower.Contains("colo colo") || lower.Contains("colo-colo") || lower.Contains("la u") || lower.Contains("universidad de chile") || lower.Contains("futbol") || lower.Contains("fútbol") || lower.Contains("partido") || lower.Contains("gano") || lower.Contains("ganó") || lower.Contains("como le fue") || lower.Contains("resultado") || lower.Contains("marcador") || lower.Contains("gol") || lower.Contains("liga") || lower.Contains("campeonato");
 
-        // REGLAS, NO RESPUESTAS. El cerebro elabora, el código solo pone límites.
         string reglas = "REGLAS GENERALES, NO SON RESPUESTAS: 1) Responde SOLO lo preguntado, no agregues temas que no pidió. 2) Todo en español chileno, PROHIBIDO palabras en inglés. 3) Texto plano para Telegram, PROHIBIDO # * _ y negritas, títulos en MAYUSCULAS, listas con guion -. 4) PROHIBIDO inventar datos, marcadores, artículos, plazos o medidas. Si no tienes el dato real, dilo. 5) PROHIBIDO decir fontanería, di instalaciones sanitarias. 6) Elabora tú la respuesta con criterio, no copies una plantilla. ";
 
         string systemPrompt;
 
         if (esDeporte)
         {
-            // Solo traemos titulares limpios, el cerebro los interpreta. No hay respuesta fija en código.
-            var datosDep = await ObtenerNoticias(texto, new[] { texto, "Liga de Primera Chile resultado" }, 24, 4);
+            var datosDep = await ObtenerNoticias(texto, new[] { texto, "Colo Colo Universidad Católica resultado 3-0 OR goleada", "Liga de Primera Chile resultado" }, 24, 5);
             if (string.IsNullOrWhiteSpace(datosDep) || datosDep.Split('\n').Length < 5)
             {
                 return "No tengo el resultado confirmado en vivo ahora.";
             }
-            systemPrompt = reglas + "Eres EspacioNitro. Lee los titulares de abajo y responde SOLO lo preguntado, con lo que ahí dice. Si el marcador no está escrito ahí, di que no lo tienes confirmado. No inventes goleador ni minuto. TITULARES:\n" + datosDep;
+            systemPrompt = reglas + $"FUENTES VERIDICAS OBLIGATORIAS PARA DEPORTE: {FUENTES_DEPORTE} Lee titular + descripción de abajo, ahí viene el marcador y el goleador. Elabora tú la respuesta SOLO con eso. Si el marcador está en la descripción aunque no esté en el titular, úsalo, es dato verídico. Si de verdad no está, di que no lo tienes. DATOS:\n" + datosDep;
         }
         else if (esArqNoticias)
         {
-            var datosArq = await ObtenerNoticias(texto, new[] { "concurso arquitectura Chile", "Colegio de Arquitectos Chile", "premio arquitectura Chile", "proyecto arquitectura Chile" }, 48, 2);
-            systemPrompt = reglas + "Eres EspacioNitro, arquitecto chileno. Usa solo los titulares reales de abajo, elabora tú el resumen. No inventes concursos ni cambios de norma. TITULARES:\n" + datosArq;
+            var datosArq = await ObtenerNoticias(texto, new[] { "concurso arquitectura Chile", "Colegio de Arquitectos Chile", "premio arquitectura Chile", "proyecto arquitectura Chile" }, 48, 3);
+            systemPrompt = reglas + $"FUENTES VERIDICAS PARA ARQUITECTURA: {FUENTES_ARQ} Usa solo los titulares reales de abajo, elabora tú el resumen. No inventes concursos ni cambios de norma. TITULARES:\n" + datosArq;
         }
         else if (esDiseno)
         {
-            // Criterio, no plantilla. El cerebro decide cuántas, dónde y por qué, según el caso.
-            systemPrompt = reglas + @"Eres EspacioNitro, arquitecto chileno experto en diseño de viviendas en Chile.
-Piensa como arquitecto, no como plantilla. Elabora tú la propuesta según el caso que te den: personas, m2 si te los dan, comuna, orientación del frente si te la dan.
-Criterio que debes usar para razonar, no para copiar:
-- En Chile, hemisferio sur, el norte recibe sol directo en invierno, el sur es más frío y con luz pareja, el oriente sol de mañana, el poniente sol fuerte de tarde en verano.
-- Ventilación cruzada: abrir en 2 lados opuestos.
-- Programa: se arma según cuántas personas viven, su privacidad y su vida diaria, no con una tabla fija.
-- Si te piden opciones, elabora tú 2 o 3 según el terreno, con pros y contras razonados.
-- Si te piden modular, razona tú ventajas y límites: fabricación, transporte, fundaciones, crecimiento.
-- Si no te dan m2, terreno o CIP, propón con criterio y marca que es propuesta a validar con el terreno real, no inventes medidas del sitio.
-- Si te piden 1 cosa, responde 1 cosa. No agregues otra.";
+            systemPrompt = reglas + $"FUENTES VERIDICAS PARA DISEÑO / NORMA: {FUENTES_NORMA} Eres EspacioNitro, arquitecto chileno experto en diseño de viviendas en Chile. Piensa como arquitecto, no como plantilla. Elabora tú la propuesta según el caso que te den: personas, m2 si te los dan, comuna, orientación del frente si te la dan. Criterio para razonar: en Chile, hemisferio sur, el norte recibe sol directo en invierno, el sur es más frío y con luz pareja, el oriente sol de mañana, el poniente sol fuerte de tarde en verano. Ventilación cruzada: abrir en 2 lados opuestos. Programa según personas y vida diaria, no con tabla fija. Si no te dan m2, terreno o CIP, propón con criterio y marca que es propuesta a validar con el terreno real, no inventes medidas del sitio. Si te piden 1 cosa, responde 1 cosa.";
         }
         else if (esNormativa)
         {
-            systemPrompt = reglas + @"Eres EspacioNitro, arquitecto chileno experto OGUC, LGUC y DOM.
-Sabes: OGUC es Ordenanza General DS 47 MINVU, norma NACIONAL. LGUC es Ley General de Urbanismo y Construcciones. DOM es Dirección de Obras Municipales. PRC es Plan Regulador Comunal. CIP es Certificado de Informaciones Previas, primer documento en DOM. EETT son Especificaciones Técnicas.
-Elabora tú la explicación según lo preguntado. Nunca inventes número de artículo, plazo o documento. Si no estás seguro, di que verifique en OGUC / CIP / DOM.";
+            systemPrompt = reglas + $"FUENTES VERIDICAS PARA NORMA: {FUENTES_NORMA} Eres EspacioNitro, arquitecto chileno experto OGUC, LGUC y DOM. Sabes: OGUC es Ordenanza General DS 47 MINVU, norma NACIONAL. LGUC es Ley General de Urbanismo y Construcciones. DOM es Dirección de Obras Municipales. PRC es Plan Regulador Comunal. CIP es Certificado de Informaciones Previas, primer documento en DOM. EETT son Especificaciones Técnicas. Elabora tú la explicación según lo preguntado. Nunca inventes número de artículo, plazo o documento. Si no estás seguro, di que verifique en OGUC / CIP / DOM.";
         }
         else if (esTrabajo)
         {
-            systemPrompt = reglas + @"Eres EspacioNitro, arquitecto chileno. Elabora tú el documento que te pidan, por ejemplo memoria, carta, checklist.
-Reglas de estructura, no de contenido: usa los 8 puntos si es memoria: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa, 5 Estructural, 6 Instalaciones, 7 Eficiencia / habitabilidad, 8 Cumplimiento.
-Para datos del sitio que no tienes, usa [COMPLETAR: según CIP], no inventes calle, zona ni medidas.
-Para lo demás, elabora tú la propuesta con criterio y marca 'Propuesta: ... a validar', no afirmes como definitivo lo que no tienes.
-No inventes número de artículo OGUC, di solo OGUC Título 4 si aplica.
-Si el usuario te dio un solo número, por ejemplo 120 m2, ese es el único número del sitio que puedes usar. El resto de medidas, si las propones, deben ser propuestas a validar, no datos del terreno.";
+            systemPrompt = reglas + $"FUENTES VERIDICAS PARA DOCUMENTOS: {FUENTES_NORMA} Eres EspacioNitro, arquitecto chileno. Elabora tú el documento que te pidan, por ejemplo memoria, carta, checklist. Reglas de estructura, no de contenido: usa los 8 puntos si es memoria: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa, 5 Estructural, 6 Instalaciones, 7 Eficiencia / habitabilidad, 8 Cumplimiento. Para datos del sitio que no tienes, usa [COMPLETAR: según CIP], no inventes calle, zona ni medidas. Para lo demás, elabora tú la propuesta con criterio y marca 'Propuesta: ... a validar', no afirmes como definitivo lo que no tienes. No inventes número de artículo OGUC.";
         }
         else if (esSantiago)
         {
@@ -275,11 +269,11 @@ Si el usuario te dio un solo número, por ejemplo 120 m2, ese es el único núme
             {
                 return "No pude traer los datos en vivo justo ahora.";
             }
-            systemPrompt = reglas + $"Eres EspacioNitro, bot Telegram Chile. Elabora tú la respuesta con los DATOS REALES de abajo. No inventes Metro ni tráfico. DATOS:\n{datos}";
+            systemPrompt = reglas + $"FUENTES VERIDICAS: {FUENTES_SANTIAGO} Eres EspacioNitro, bot Telegram Chile. Elabora tú la respuesta con los DATOS REALES de abajo. No inventes Metro ni tráfico. DATOS:\n{datos}";
         }
         else
         {
-            systemPrompt = reglas + "Eres EspacioNitro, arquitecto chileno, bot Telegram. Elabora tú la respuesta con criterio de arquitecto chileno. OGUC nacional DS 47, LGUC Ley General Urbanismo, DOM Dirección Obras Municipales, EETT Especificaciones Técnicas.";
+            systemPrompt = reglas + $"FUENTES VERIDICAS: {FUENTES_SANTIAGO} {FUENTES_NORMA} Eres EspacioNitro, arquitecto chileno, bot Telegram. Elabora tú la respuesta con criterio de arquitecto chileno.";
         }
 
         using var groq = new HttpClient();
