@@ -20,6 +20,8 @@ string cacheDatos = "";
 DateTime cacheHora = DateTime.MinValue;
 string cacheArq = "";
 DateTime cacheArqHora = DateTime.MinValue;
+string cacheDeporte = "";
+DateTime cacheDeporteHora = DateTime.MinValue;
 
 using var http = new HttpClient();
 var offset = 0L;
@@ -52,7 +54,6 @@ while (true)
             respuesta = respuesta.Replace("Fontanería", "Instalaciones sanitarias");
             respuesta = respuesta.Replace("PROPOSAL", "Propuesta", StringComparison.OrdinalIgnoreCase);
             respuesta = respuesta.Replace("Proposal", "Propuesta");
-            respuesta = respuesta.Replace("PRO:", "PRO:");
             respuesta = respuesta.Replace("**", "");
             respuesta = respuesta.Replace("__", "");
             respuesta = Regex.Replace(respuesta, @"^#{1,6}\s*", "", RegexOptions.Multiline);
@@ -205,6 +206,62 @@ async Task<string> ObtenerNoticiasArquitectura()
     catch { return cacheArq; }
 }
 
+async Task<string> ObtenerDatosDeporte(string pregunta)
+{
+    if (!string.IsNullOrWhiteSpace(cacheDeporte) && (DateTime.UtcNow - cacheDeporteHora).TotalMinutes < 10)
+    {
+        Console.WriteLine("DATOS: usando caché Deporte");
+        return cacheDeporte;
+    }
+
+    try
+    {
+        using var client = new HttpClient();
+        client.Timeout = TimeSpan.FromSeconds(8);
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 EspacioNitroBot");
+        var sb = new StringBuilder();
+        sb.AppendLine($"FECHA HOY: {DateTime.Now:dd/MM/yyyy HH:mm} America/Santiago");
+        sb.AppendLine($"PREGUNTA DEL USUARIO: {pregunta}");
+        sb.AppendLine("NOTICIAS DEPORTE ULTIMAS 24H - SOLO USAR ESTO, NO INVENTAR:");
+
+        // Busca la pregunta tal cual + búsqueda general de fútbol chileno
+        var queries = new[] { pregunta, "Colo Colo Universidad Católica resultado", "Liga de Primera Chile resultado hoy", "Universidad de Chile resultado" };
+        foreach (var q in queries)
+        {
+            try
+            {
+                var url = $"https://news.google.com/rss/search?q={Uri.EscapeDataString(q)}&hl=es-419&gl=CL&ceid=CL:es-419";
+                var rss = await client.GetStringAsync(url);
+                var items = Regex.Matches(rss, @"<item>(.*?)</item>", RegexOptions.Singleline);
+                int c = 0;
+                foreach (Match item in items)
+                {
+                    var titleM = Regex.Match(item.Value, @"<title>(.*?)</title>");
+                    var dateM = Regex.Match(item.Value, @"<pubDate>(.*?)</pubDate>");
+                    var descM = Regex.Match(item.Value, @"<description>(.*?)</description>");
+                    if (!titleM.Success || !dateM.Success) continue;
+                    var titulo = Regex.Replace(titleM.Groups[1].Value, "<.*?>", "").Trim();
+                    if (titulo.Contains("Google News")) continue;
+                    if (DateTime.TryParse(dateM.Groups[1].Value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var fecha))
+                    {
+                        if ((DateTime.UtcNow - fecha.ToUniversalTime()).TotalHours > 24) continue;
+                        var desc = descM.Success ? Regex.Replace(descM.Groups[1].Value, "<.*?>", "").Trim() : "";
+                        sb.AppendLine($"- [{fecha:dd/MM HH:mm}] {titulo} | {desc}");
+                        c++;
+                        if (c >= 4) break;
+                    }
+                }
+            }
+            catch { }
+        }
+
+        var r = sb.ToString();
+        cacheDeporte = r; cacheDeporteHora = DateTime.UtcNow;
+        return r;
+    }
+    catch { return ""; }
+}
+
 async Task<string> ResponderConGroq(string texto)
 {
     try
@@ -215,10 +272,21 @@ async Task<string> ResponderConGroq(string texto)
         bool esNormativa = lower.Contains("oguc") || lower.Contains("lguc") || lower.Contains("permiso") || lower.Contains("anteproyecto") || lower.Contains("recepcion") || lower.Contains("recepción") || lower.Contains("dom") || lower.Contains("normativa") || lower.Contains("articulo") || lower.Contains("artículo") || lower.Contains("cip") || lower.Contains("prc");
         bool esTrabajo = lower.Contains("memoria") || lower.Contains("carta") || lower.Contains("expediente") || lower.Contains("presupuesto") || lower.Contains("especificacion") || lower.Contains("especificación") || lower.Contains("redacta") || lower.Contains("checklist") || lower.Contains("informe") || lower.Contains("redactame") || lower.Contains("redáctame");
         bool esDiseno = lower.Contains("ventana") || lower.Contains("norte") || lower.Contains("sur") || lower.Contains("oriente") || lower.Contains("poniente") || lower.Contains("cuantas piezas") || lower.Contains("cuántas piezas") || lower.Contains("cuantos dormitorios") || lower.Contains("cuántos dormitorios") || lower.Contains("cuantas personas") || lower.Contains("cuántas personas") || lower.Contains("viven") || lower.Contains("que diseño") || lower.Contains("qué diseño") || lower.Contains("diseño de casa") || lower.Contains("diseno de casa") || lower.Contains("modular") || lower.Contains("patio") || lower.Contains("terraza") || lower.Contains("orientacion") || lower.Contains("orientación") || lower.Contains("distribucion") || lower.Contains("distribución") || lower.Contains("planta") || lower.Contains("segundo piso") || lower.Contains("ampliacion") || lower.Contains("ampliación");
+        bool esDeporte = lower.Contains("catolica") || lower.Contains("católica") || lower.Contains("colo colo") || lower.Contains("colo-colo") || lower.Contains("la u") || lower.Contains("universidad de chile") || lower.Contains("futbol") || lower.Contains("fútbol") || lower.Contains("partido") || lower.Contains("gano") || lower.Contains("ganó") || lower.Contains("como le fue") || lower.Contains("como le fue") || lower.Contains("resultado") || lower.Contains("marcador") || lower.Contains("gol") || lower.Contains("liga") || lower.Contains("campeonato");
 
         string systemPrompt;
 
-        if (esArqNoticias)
+        if (esDeporte)
+        {
+            var datosDep = await ObtenerDatosDeporte(texto);
+            Console.WriteLine($"DATOS DEPORTE: {datosDep}");
+            if (string.IsNullOrWhiteSpace(datosDep) || !datosDep.Contains("Colo") && !datosDep.Contains("Católica") && !datosDep.Contains("Chile") && !datosDep.Contains("U. de"))
+            {
+                return "No tengo el resultado confirmado en vivo ahora, no te quiero inventar un marcador. Revisa en Cooperativa, TNT Sports o BioBio y en 10 minutos me preguntas de nuevo.";
+            }
+            systemPrompt = $"Eres EspacioNitro. Responde SOLO con los datos reales de abajo, en español chileno, corto, texto plano para Telegram, PROHIBIDO usar # * _ y negritas. REGLA DURA: PROHIBIDO inventar marcador, goleador, minuto o ganador. Si el dato no está en los datos de abajo, di 'No tengo ese dato confirmado'. No digas 2 resultados distintos. Si el partido ya se jugó, di el marcador una sola vez, claro, y quién hizo los goles solo si está en los datos. DATOS:\n{datosDep}";
+        }
+        else if (esArqNoticias)
         {
             var datosArq = await ObtenerNoticiasArquitectura();
             Console.WriteLine($"DATOS ARQ: {datosArq}");
@@ -329,7 +397,7 @@ Memoria 1-8: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa y superficies, 5 Es
         }
         else
         {
-            systemPrompt = "Eres EspacioNitro, arquitecto chileno, bot Telegram. Responde corto, español chileno. OGUC nacional DS 47, LGUC Ley General Urbanismo, DOM Dirección Obras Municipales, EETT Especificaciones Técnicas. Nunca POT/PDU. FORMATO: texto plano, PROHIBIDO # * _ y negritas.";
+            systemPrompt = "Eres EspacioNitro, arquitecto chileno, bot Telegram. Responde corto, español chileno. OGUC nacional DS 47, LGUC Ley General Urbanismo, DOM Dirección Obras Municipales, EETT Especificaciones Técnicas. Nunca POT/PDU. FORMATO: texto plano, PROHIBIDO # * _ y negritas. REGLA DURA: si te preguntan por un partido, resultado, marcador o goleador y no tienes dato real, di que no lo tienes, PROHIBIDO inventar.";
         }
 
         using var groq = new HttpClient();
