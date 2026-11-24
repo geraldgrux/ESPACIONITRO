@@ -17,16 +17,16 @@ _ = app.RunAsync($"http://+:{port}");
 
 Console.WriteLine("Bot Telegram iniciado - Modo Arquitectura...");
 
-string cacheDatos = "";
-DateTime cacheHora = DateTime.MinValue;
+// CONTINUIDAD REAL: historia por chat, no solo último lugar
+// Guarda: usuario dice -> bot responde -> usuario dice -> bot responde...
+var historiaPorChat = new Dictionary<long, List<(string rol, string texto)>>();
+var memoriaLugar = new Dictionary<long, string>();
 
 using var http = new HttpClient();
 var offset = 0L;
 
-// FUENTES VERIDICAS ESTABLECIDAS - NO SON RESPUESTAS, SON DE DONDE SACAR EL DATO
-// El cerebro elabora, pero SOLO con lo que viene de estas fuentes.
 const string FUENTES_DEPORTE = "Cooperativa.cl, BioBioChile.cl, TNTSports.cl, ANFP.cl, ESPN Chile. Si el dato no está ahí, no lo inventes.";
-const string FUENTES_CLIMA = "Open-Meteo y Dirección Meteorológica de Chile (meteochile.gob.cl).";
+const string FUENTES_CLIMA = "Open-Meteo geocoding + forecast y Dirección Meteorológica de Chile (meteochile.gob.cl). PROHIBIDO inventar temperatura si no viene del pronóstico.";
 const string FUENTES_NORMA = "MINVU, OGUC DS 47 oficial, LGUC, Diario Oficial, DOM de la comuna, CIP. No uses blogs ni foros.";
 const string FUENTES_ARQ = "Colegio de Arquitectos de Chile, MINVU, concursos y premios oficiales, Diario Oficial.";
 const string FUENTES_SANTIAGO = "Cooperativa, BioBioChile, TNT Sports para deporte, Open-Meteo para clima, MINVU / DOM para norma.";
@@ -52,7 +52,7 @@ while (true)
             var texto = textEl.GetString() ?? "";
             Console.WriteLine($"MENSAJE: {texto} de {chatId}");
 
-            var respuesta = await ResponderConGroq(texto);
+            var respuesta = await ResponderConGroq(texto, chatId);
             if (string.IsNullOrWhiteSpace(respuesta)) respuesta = "Estoy con problemas para traer los datos en vivo ahora, prueba de nuevo en un momento.";
 
             respuesta = respuesta.Replace("fontanería", "instalaciones sanitarias", StringComparison.OrdinalIgnoreCase);
@@ -99,78 +99,56 @@ string LimpiarTexto(string s)
     return s;
 }
 
-async Task<string> ObtenerDatosSantiago()
+async Task<string> ObtenerClimaCiudad(string ciudad)
 {
-    if (!string.IsNullOrWhiteSpace(cacheDatos) && (DateTime.UtcNow - cacheHora).TotalMinutes < 15)
-    {
-        Console.WriteLine("DATOS: usando caché Santiago");
-        return cacheDatos;
-    }
-
     try
     {
         using var client = new HttpClient();
-        client.Timeout = TimeSpan.FromSeconds(8);
+        client.Timeout = TimeSpan.FromSeconds(10);
         client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 EspacioNitroBot");
         var sb = new StringBuilder();
+        sb.AppendLine($"FUENTES CLIMA: {FUENTES_CLIMA}");
+        sb.AppendLine($"CIUDAD PEDIDA: {ciudad}");
         sb.AppendLine($"FECHA HOY: {DateTime.Now:dd/MM/yyyy HH:mm} America/Santiago");
-        sb.AppendLine($"FUENTES CLIMA VERIDICAS: {FUENTES_CLIMA}");
 
-        bool climaOk = false;
-        try
+        var geoUrl = $"https://geocoding-api.open-meteo.com/v1/search?name={Uri.EscapeDataString(ciudad)}&count=1&language=es&format=json";
+        var geoJson = await client.GetStringAsync(geoUrl);
+        using var geoDoc = JsonDocument.Parse(geoJson);
+        if (!geoDoc.RootElement.TryGetProperty("results", out var results) || results.GetArrayLength() == 0)
         {
-            var climaJson = await client.GetStringAsync("https://api.open-meteo.com/v1/forecast?latitude=-33.45&longitude=-70.66&current=temperature_2m,precipitation,wind_speed_10m&timezone=America%2FSantiago");
-            using var d = JsonDocument.Parse(climaJson);
-            var cur = d.RootElement.GetProperty("current");
-            sb.AppendLine($"CLIMA REAL SANTIAGO: {cur.GetProperty("temperature_2m").GetDouble()}°C, lluvia {cur.GetProperty("precipitation").GetDouble()} mm, viento {cur.GetProperty("wind_speed_10m").GetDouble()} km/h.");
-            climaOk = true;
+            return $"No encontré la comuna {ciudad} en el geocodificador de Open-Meteo.";
         }
-        catch (Exception ex) { Console.WriteLine($"CLIMA A FALLO: {ex.Message}"); }
+        var r0 = results[0];
+        var lat = r0.GetProperty("latitude").GetDouble();
+        var lon = r0.GetProperty("longitude").GetDouble();
+        var nombreReal = r0.TryGetProperty("name", out var n) ? n.GetString() : ciudad;
+        var admin = r0.TryGetProperty("admin1", out var a) ? a.GetString() : "";
+        sb.AppendLine($"LUGAR REAL ENCONTRADO: {nombreReal}, {admin} lat {lat} lon {lon}");
 
-        if (!climaOk)
+        var fcUrl = $"https://api.open-meteo.com/v1/forecast?latitude={lat.ToString(CultureInfo.InvariantCulture)}&longitude={lon.ToString(CultureInfo.InvariantCulture)}&current=temperature_2m,precipitation,wind_speed_10m,wind_direction_10m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=America%2FSantiago&forecast_days=2";
+        var fcJson = await client.GetStringAsync(fcUrl);
+        using var d = JsonDocument.Parse(fcJson);
+        var cur = d.RootElement.GetProperty("current");
+        var daily = d.RootElement.GetProperty("daily");
+        var fechas = daily.GetProperty("time");
+        var maxs = daily.GetProperty("temperature_2m_max");
+        var mins = daily.GetProperty("temperature_2m_min");
+        var probs = daily.TryGetProperty("precipitation_probability_max", out var p) ? p : default;
+
+        sb.AppendLine($"CLIMA ACTUAL {nombreReal}: {cur.GetProperty("temperature_2m").GetDouble()}°C, lluvia {cur.GetProperty("precipitation").GetDouble()} mm, viento {cur.GetProperty("wind_speed_10m").GetDouble()} km/h dirección {cur.GetProperty("wind_direction_10m").GetDouble()}°, código clima {cur.GetProperty("weather_code").GetInt32()}.");
+        for (int i = 0; i < fechas.GetArrayLength(); i++)
         {
-            try
-            {
-                var w = await client.GetStringAsync("https://wttr.in/Santiago?format=j1");
-                using var d = JsonDocument.Parse(w);
-                var cur = d.RootElement.GetProperty("current_condition")[0];
-                sb.AppendLine($"CLIMA REAL SANTIAGO (respaldo): {cur.GetProperty("temp_C").GetString()}°C, {cur.GetProperty("weatherDesc")[0].GetProperty("value").GetString()}.");
-            }
-            catch (Exception ex) { Console.WriteLine($"CLIMA B FALLO: {ex.Message}"); }
+            var probTxt = probs.ValueKind == JsonValueKind.Array && probs.GetArrayLength() > i && probs[i].ValueKind != JsonValueKind.Null ? $"{probs[i].GetInt32()}%" : "sin dato";
+            sb.AppendLine($"PRONOSTICO {fechas[i].GetString()}: máxima {maxs[i].GetDouble()}°C, mínima {mins[i].GetDouble()}°C, prob. lluvia máx {probTxt}.");
         }
-
-        try
-        {
-            var rss = await client.GetStringAsync("https://news.google.com/rss/search?q=Santiago%20Chile&hl=es-419&gl=CL&ceid=CL:es-419");
-            var items = Regex.Matches(rss, @"<item>(.*?)</item>", RegexOptions.Singleline);
-            sb.AppendLine("NOTICIAS SANTIAGO ULTIMAS 24H:");
-            int count = 0;
-            foreach (Match item in items)
-            {
-                var titleM = Regex.Match(item.Value, @"<title>(.*?)</title>");
-                var dateM = Regex.Match(item.Value, @"<pubDate>(.*?)</pubDate>");
-                var descM = Regex.Match(item.Value, @"<description>(.*?)</description>");
-                if (!titleM.Success || !dateM.Success) continue;
-                var titulo = LimpiarTexto(titleM.Groups[1].Value);
-                var desc = descM.Success ? LimpiarTexto(descM.Groups[1].Value) : "";
-                if (titulo.Contains("Google News")) continue;
-                if (DateTime.TryParse(dateM.Groups[1].Value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var fecha))
-                {
-                    if ((DateTime.UtcNow - fecha.ToUniversalTime()).TotalHours > 24) continue;
-                    sb.AppendLine($"- [{fecha:dd/MM HH:mm}] {titulo} | {desc}");
-                    count++;
-                    if (count >= 6) break;
-                }
-            }
-            if (count == 0) sb.AppendLine("- No hay noticias de las últimas 24h.");
-        }
-        catch (Exception ex) { Console.WriteLine($"NOTICIAS FALLO: {ex.Message}"); }
-
-        var r = sb.ToString();
-        if (!string.IsNullOrWhiteSpace(r)) { cacheDatos = r; cacheHora = DateTime.UtcNow; return r; }
-        return cacheDatos != "" ? cacheDatos : "Sin datos reales.";
+        sb.AppendLine("INSTRUCCION: usa SOLO estos números. Si te piden máxima, usa la máxima de hoy de arriba. No inventes otra.");
+        return sb.ToString();
     }
-    catch { return cacheDatos != "" ? cacheDatos : "Sin datos reales."; }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"CLIMA CIUDAD FALLO: {ex.Message}");
+        return "";
+    }
 }
 
 async Task<string> ObtenerNoticias(string pregunta, string[] queries, int horas, int porQuery)
@@ -183,7 +161,7 @@ async Task<string> ObtenerNoticias(string pregunta, string[] queries, int horas,
         var sb = new StringBuilder();
         sb.AppendLine($"FECHA HOY: {DateTime.Now:dd/MM/yyyy HH:mm} America/Santiago");
         sb.AppendLine($"PREGUNTA: {pregunta}");
-        sb.AppendLine("TITULAR + DESCRIPCION LIMPIA - AHI VIENE EL MARCADOR, EL GOLEADOR, EL DETALLE:");
+        sb.AppendLine("TITULAR + DESCRIPCION LIMPIA:");
         foreach (var q in queries)
         {
             try
@@ -200,7 +178,6 @@ async Task<string> ObtenerNoticias(string pregunta, string[] queries, int horas,
                     if (!titleM.Success || !dateM.Success) continue;
                     var titulo = LimpiarTexto(titleM.Groups[1].Value);
                     var desc = descM.Success ? LimpiarTexto(descM.Groups[1].Value) : "";
-                    // Corta la descripción para que no venga basura, pero deja el dato
                     if (desc.Length > 300) desc = desc.Substring(0, 300);
                     if (titulo.Contains("Google News") || titulo.Length < 10) continue;
                     if (DateTime.TryParse(dateM.Groups[1].Value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var fecha))
@@ -219,65 +196,117 @@ async Task<string> ObtenerNoticias(string pregunta, string[] queries, int horas,
     catch { return ""; }
 }
 
-async Task<string> ResponderConGroq(string texto)
+string ExtraerCiudad(string texto)
+{
+    var t = texto.ToLower();
+    t = t.Replace("como va a estar el clima en ", "").Replace("como va a estar el clima el ", "").Replace("como va a estar el clima en el ", "")
+         .Replace("como esta el clima en ", "").Replace("como está el clima en ", "").Replace("clima en ", "").Replace("clima el ", "")
+         .Replace("que clima va a hacer en ", "").Replace("qué clima va a hacer en ", "").Replace("el clima en ", "")
+         .Replace("como va a estar el clima ", "").Replace("?", "").Replace("¿", "").Trim();
+    if (t.Length > 0 && t.Length < 40) return CultureInfo.CurrentCulture.TextInfo.ToTitleCase(t);
+    return "";
+}
+
+async Task<string> ResponderConGroq(string texto, long chatId)
 {
     try
     {
-        var lower = texto.ToLower();
-        bool esSantiago = lower.Contains("santiago") || lower.Contains("paso hoy") || lower.Contains("clima") || lower.Contains("tiempo") || lower.Contains("metro") || lower.Contains("lluvia");
-        bool esArqNoticias = lower.Contains("noticias") && (lower.Contains("arquitect") || lower.Contains("minvu") || lower.Contains("oguc") || lower.Contains("colegio") || lower.Contains("concurso")) || lower.Contains("noticias de arquitectura") || lower.Contains("que noticias hay de arquitectura");
+        // 1. Recuperar historia de este chat
+        if (!historiaPorChat.ContainsKey(chatId)) historiaPorChat[chatId] = new List<(string, string)>();
+        var historia = historiaPorChat[chatId];
+
+        // 2. Armar texto con contexto para detectar tema, si es seguimiento usa la historia
+        string textoParaDetectar = texto;
+        if (historia.Count > 0)
+        {
+            // Junta los últimos 4 mensajes para entender "y el máximo?", "y en la tarde?", etc.
+            var ultimos = string.Join(" | ", historia.TakeLast(4).Select(h => $"{h.rol}: {h.texto}"));
+            textoParaDetectar = texto + " || HISTORIA: " + ultimos;
+        }
+
+        var lower = textoParaDetectar.ToLower();
+        bool esClima = lower.Contains("clima") || lower.Contains("tiempo") || lower.Contains("lluvia") || lower.Contains("temperatura") || lower.Contains("maximo") || lower.Contains("máximo") || lower.Contains("minimo") || lower.Contains("mínimo") || lower.Contains("va a llover") || lower.Contains("como va a estar");
+        bool esSantiagoNoticias = lower.Contains("paso hoy") || lower.Contains("noticias de santiago") || lower.Contains("que paso en santiago");
+        bool esArqNoticias = lower.Contains("noticias") && (lower.Contains("arquitect") || lower.Contains("minvu") || lower.Contains("oguc") || lower.Contains("colegio") || lower.Contains("concurso")) || lower.Contains("noticias de arquitectura");
         bool esNormativa = lower.Contains("oguc") || lower.Contains("lguc") || lower.Contains("permiso") || lower.Contains("anteproyecto") || lower.Contains("recepcion") || lower.Contains("recepción") || lower.Contains("dom") || lower.Contains("normativa") || lower.Contains("articulo") || lower.Contains("artículo") || lower.Contains("cip") || lower.Contains("prc");
         bool esTrabajo = lower.Contains("memoria") || lower.Contains("carta") || lower.Contains("expediente") || lower.Contains("presupuesto") || lower.Contains("especificacion") || lower.Contains("especificación") || lower.Contains("redacta") || lower.Contains("checklist") || lower.Contains("informe") || lower.Contains("redactame") || lower.Contains("redáctame");
         bool esDiseno = lower.Contains("ventana") || lower.Contains("norte") || lower.Contains("sur") || lower.Contains("oriente") || lower.Contains("poniente") || lower.Contains("cuantas piezas") || lower.Contains("cuántas piezas") || lower.Contains("cuantos dormitorios") || lower.Contains("cuántos dormitorios") || lower.Contains("cuantas personas") || lower.Contains("cuántas personas") || lower.Contains("viven") || lower.Contains("que diseño") || lower.Contains("qué diseño") || lower.Contains("diseño de casa") || lower.Contains("diseno de casa") || lower.Contains("modular") || lower.Contains("patio") || lower.Contains("terraza") || lower.Contains("orientacion") || lower.Contains("orientación") || lower.Contains("distribucion") || lower.Contains("distribución") || lower.Contains("planta") || lower.Contains("segundo piso") || lower.Contains("ampliacion") || lower.Contains("ampliación");
         bool esDeporte = lower.Contains("catolica") || lower.Contains("católica") || lower.Contains("colo colo") || lower.Contains("colo-colo") || lower.Contains("la u") || lower.Contains("universidad de chile") || lower.Contains("futbol") || lower.Contains("fútbol") || lower.Contains("partido") || lower.Contains("gano") || lower.Contains("ganó") || lower.Contains("como le fue") || lower.Contains("resultado") || lower.Contains("marcador") || lower.Contains("gol") || lower.Contains("liga") || lower.Contains("campeonato");
 
-        string reglas = "REGLAS GENERALES, NO SON RESPUESTAS: 1) Responde SOLO lo preguntado, no agregues temas que no pidió. 2) Todo en español chileno, PROHIBIDO palabras en inglés. 3) Texto plano para Telegram, PROHIBIDO # * _ y negritas, títulos en MAYUSCULAS, listas con guion -. 4) PROHIBIDO inventar datos, marcadores, artículos, plazos o medidas. Si no tienes el dato real, dilo. 5) PROHIBIDO decir fontanería, di instalaciones sanitarias. 6) Elabora tú la respuesta con criterio, no copies una plantilla. ";
+        string reglas = "REGLAS GENERALES, NO SON RESPUESTAS: 1) Responde SOLO lo preguntado, no agregues temas que no pidió. 2) Todo en español chileno, PROHIBIDO palabras en inglés. 3) Texto plano para Telegram, PROHIBIDO # * _ y negritas, títulos en MAYUSCULAS, listas con guion -. 4) PROHIBIDO inventar datos, marcadores, artículos, plazos o medidas. Si no tienes el dato real, dilo. 5) PROHIBIDO decir fontanería, di instalaciones sanitarias. 6) Elabora tú la respuesta con criterio, no copies una plantilla. 7) CONTINUIDAD: esta conversación tiene historia, úsala. Si el usuario dice 'y el máximo?', 'y mañana?', 'y en la tarde?', se refiere al mismo lugar / tema de los mensajes anteriores, no pidas contexto de nuevo. 8) PROHIBIDO decir 'NO PUEDO RESPONDER SIN MAS CONTEXTO' si hay historia en la conversación, usa la historia. ";
 
         string systemPrompt;
+        string ciudadDetectada = "";
 
-        if (esDeporte)
+        if (esClima)
         {
-            var datosDep = await ObtenerNoticias(texto, new[] { texto, "Colo Colo Universidad Católica resultado 3-0 OR goleada", "Liga de Primera Chile resultado" }, 24, 5);
+            ciudadDetectada = ExtraerCiudad(texto);
+            if ((string.IsNullOrWhiteSpace(ciudadDetectada) || ciudadDetectada.ToLower().Contains("y el") || ciudadDetectada.ToLower().Contains("maximo")) && memoriaLugar.ContainsKey(chatId)) ciudadDetectada = memoriaLugar[chatId];
+            if (string.IsNullOrWhiteSpace(ciudadDetectada))
+            {
+                // Busca en historia la última ciudad mencionada
+                foreach (var h in historia.AsEnumerable().Reverse())
+                {
+                    var c = ExtraerCiudad(h.texto);
+                    if (!string.IsNullOrWhiteSpace(c) && !c.ToLower().Contains("y el")) { ciudadDetectada = c; break; }
+                }
+            }
+            if (string.IsNullOrWhiteSpace(ciudadDetectada)) ciudadDetectada = "Santiago";
+            memoriaLugar[chatId] = ciudadDetectada;
+            var datosClima = await ObtenerClimaCiudad(ciudadDetectada);
+            if (string.IsNullOrWhiteSpace(datosClima))
+            {
+                return "No pude traer el pronóstico en vivo justo ahora.";
+            }
+            systemPrompt = reglas + $"FUENTES VERIDICAS PARA CLIMA: {FUENTES_CLIMA} El usuario preguntó por {ciudadDetectada}. Responde SOLO lo preguntado, con los números reales de abajo. Si preguntó máxima, da solo la máxima. DATOS:\n" + datosClima;
+        }
+        else if (esDeporte)
+        {
+            var datosDep = await ObtenerNoticias(texto, new[] { texto, "Liga de Primera Chile resultado" }, 24, 5);
             if (string.IsNullOrWhiteSpace(datosDep) || datosDep.Split('\n').Length < 5)
             {
                 return "No tengo el resultado confirmado en vivo ahora.";
             }
-            systemPrompt = reglas + $"FUENTES VERIDICAS OBLIGATORIAS PARA DEPORTE: {FUENTES_DEPORTE} Lee titular + descripción de abajo, ahí viene el marcador y el goleador. Elabora tú la respuesta SOLO con eso. Si el marcador está en la descripción aunque no esté en el titular, úsalo, es dato verídico. Si de verdad no está, di que no lo tienes. DATOS:\n" + datosDep;
+            systemPrompt = reglas + $"FUENTES VERIDICAS OBLIGATORIAS PARA DEPORTE: {FUENTES_DEPORTE} Lee titular + descripción de abajo, ahí viene el marcador y el goleador. Elabora tú la respuesta SOLO con eso. DATOS:\n" + datosDep;
         }
         else if (esArqNoticias)
         {
             var datosArq = await ObtenerNoticias(texto, new[] { "concurso arquitectura Chile", "Colegio de Arquitectos Chile", "premio arquitectura Chile", "proyecto arquitectura Chile" }, 48, 3);
-            systemPrompt = reglas + $"FUENTES VERIDICAS PARA ARQUITECTURA: {FUENTES_ARQ} Usa solo los titulares reales de abajo, elabora tú el resumen. No inventes concursos ni cambios de norma. TITULARES:\n" + datosArq;
+            systemPrompt = reglas + $"FUENTES VERIDICAS PARA ARQUITECTURA: {FUENTES_ARQ} Usa solo los titulares reales de abajo, elabora tú el resumen. TITULARES:\n" + datosArq;
         }
         else if (esDiseno)
         {
-            systemPrompt = reglas + $"FUENTES VERIDICAS PARA DISEÑO / NORMA: {FUENTES_NORMA} Eres EspacioNitro, arquitecto chileno experto en diseño de viviendas en Chile. Piensa como arquitecto, no como plantilla. Elabora tú la propuesta según el caso que te den: personas, m2 si te los dan, comuna, orientación del frente si te la dan. Criterio para razonar: en Chile, hemisferio sur, el norte recibe sol directo en invierno, el sur es más frío y con luz pareja, el oriente sol de mañana, el poniente sol fuerte de tarde en verano. Ventilación cruzada: abrir en 2 lados opuestos. Programa según personas y vida diaria, no con tabla fija. Si no te dan m2, terreno o CIP, propón con criterio y marca que es propuesta a validar con el terreno real, no inventes medidas del sitio. Si te piden 1 cosa, responde 1 cosa.";
+            systemPrompt = reglas + $"FUENTES VERIDICAS PARA DISEÑO / NORMA: {FUENTES_NORMA} Eres EspacioNitro, arquitecto chileno experto en diseño de viviendas en Chile. Elabora tú la propuesta según el caso que te den, usando la historia si te dieron personas, m2, comuna antes. Criterio: en Chile, hemisferio sur, el norte recibe sol directo en invierno, el sur es más frío, el oriente sol de mañana, el poniente sol fuerte de tarde. Ventilación cruzada: abrir en 2 lados opuestos.";
         }
         else if (esNormativa)
         {
-            systemPrompt = reglas + $"FUENTES VERIDICAS PARA NORMA: {FUENTES_NORMA} Eres EspacioNitro, arquitecto chileno experto OGUC, LGUC y DOM. Sabes: OGUC es Ordenanza General DS 47 MINVU, norma NACIONAL. LGUC es Ley General de Urbanismo y Construcciones. DOM es Dirección de Obras Municipales. PRC es Plan Regulador Comunal. CIP es Certificado de Informaciones Previas, primer documento en DOM. EETT son Especificaciones Técnicas. Elabora tú la explicación según lo preguntado. Nunca inventes número de artículo, plazo o documento. Si no estás seguro, di que verifique en OGUC / CIP / DOM.";
+            systemPrompt = reglas + $"FUENTES VERIDICAS PARA NORMA: {FUENTES_NORMA} Eres EspacioNitro, arquitecto chileno experto OGUC, LGUC y DOM. Elabora tú la explicación según lo preguntado. Nunca inventes número de artículo, plazo o documento.";
         }
         else if (esTrabajo)
         {
-            systemPrompt = reglas + $"FUENTES VERIDICAS PARA DOCUMENTOS: {FUENTES_NORMA} Eres EspacioNitro, arquitecto chileno. Elabora tú el documento que te pidan, por ejemplo memoria, carta, checklist. Reglas de estructura, no de contenido: usa los 8 puntos si es memoria: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa, 5 Estructural, 6 Instalaciones, 7 Eficiencia / habitabilidad, 8 Cumplimiento. Para datos del sitio que no tienes, usa [COMPLETAR: según CIP], no inventes calle, zona ni medidas. Para lo demás, elabora tú la propuesta con criterio y marca 'Propuesta: ... a validar', no afirmes como definitivo lo que no tienes. No inventes número de artículo OGUC.";
+            systemPrompt = reglas + $"FUENTES VERIDICAS PARA DOCUMENTOS: {FUENTES_NORMA} Eres EspacioNitro, arquitecto chileno. Elabora tú el documento que te pidan, usando la historia si ya te dieron datos. Si es memoria, usa 8 puntos: 1 Datos, 2 CIP/PRC, 3 Emplazamiento, 4 Programa, 5 Estructural, 6 Instalaciones, 7 Eficiencia / habitabilidad, 8 Cumplimiento. Para datos del sitio que no tienes, usa [COMPLETAR: según CIP], no inventes.";
         }
-        else if (esSantiago)
+        else if (esSantiagoNoticias)
         {
-            var datos = await ObtenerDatosSantiago();
-            Console.WriteLine($"DATOS: {datos}");
-            if (datos.Contains("Sin datos reales"))
-            {
-                return "No pude traer los datos en vivo justo ahora.";
-            }
-            systemPrompt = reglas + $"FUENTES VERIDICAS: {FUENTES_SANTIAGO} Eres EspacioNitro, bot Telegram Chile. Elabora tú la respuesta con los DATOS REALES de abajo. No inventes Metro ni tráfico. DATOS:\n{datos}";
+            var datos = await ObtenerNoticias(texto, new[] { "Santiago Chile" }, 24, 6);
+            systemPrompt = reglas + $"FUENTES VERIDICAS: {FUENTES_SANTIAGO} Elabora tú la respuesta con los DATOS REALES de abajo. DATOS:\n{datos}";
         }
         else
         {
-            systemPrompt = reglas + $"FUENTES VERIDICAS: {FUENTES_SANTIAGO} {FUENTES_NORMA} Eres EspacioNitro, arquitecto chileno, bot Telegram. Elabora tú la respuesta con criterio de arquitecto chileno.";
+            systemPrompt = reglas + $"FUENTES VERIDICAS: {FUENTES_SANTIAGO} {FUENTES_NORMA} Eres EspacioNitro, arquitecto chileno, bot Telegram. Elabora tú la respuesta con criterio de arquitecto chileno, usando la historia de la conversación.";
         }
 
         using var groq = new HttpClient();
         groq.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", groqKey);
+
+        // Armar mensajes con historia: system + últimos 8 mensajes + pregunta actual
+        var mensajes = new List<object>();
+        mensajes.Add(new { role = "system", content = systemPrompt });
+        foreach (var h in historia.TakeLast(8))
+        {
+            mensajes.Add(new { role = h.rol, content = h.texto });
+        }
+        mensajes.Add(new { role = "user", content = texto });
 
         var intentos = new[]
         {
@@ -293,32 +322,11 @@ async Task<string> ResponderConGroq(string texto)
                 object payload;
                 if (string.IsNullOrEmpty(it.Reasoning))
                 {
-                    payload = new
-                    {
-                        model = it.Modelo,
-                        messages = new[]
-                        {
-                            new { role = "system", content = systemPrompt },
-                            new { role = "user", content = texto }
-                        },
-                        temperature = 0.3,
-                        max_tokens = it.Tokens
-                    };
+                    payload = new { model = it.Modelo, messages = mensajes, temperature = 0.3, max_tokens = it.Tokens };
                 }
                 else
                 {
-                    payload = new
-                    {
-                        model = it.Modelo,
-                        messages = new[]
-                        {
-                            new { role = "system", content = systemPrompt },
-                            new { role = "user", content = texto }
-                        },
-                        temperature = 0.3,
-                        max_completion_tokens = it.Tokens,
-                        reasoning_effort = it.Reasoning
-                    };
+                    payload = new { model = it.Modelo, messages = mensajes, temperature = 0.3, max_completion_tokens = it.Tokens, reasoning_effort = it.Reasoning };
                 }
 
                 var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
@@ -335,7 +343,15 @@ async Task<string> ResponderConGroq(string texto)
                 if (string.IsNullOrWhiteSpace(resp) && msg.TryGetProperty("reasoning_content", out var rc) && rc.ValueKind == JsonValueKind.String)
                     resp = rc.GetString();
 
-                if (!string.IsNullOrWhiteSpace(resp)) return resp;
+                if (!string.IsNullOrWhiteSpace(resp))
+                {
+                    // Guardar en historia para la próxima pregunta
+                    historia.Add(("user", texto));
+                    historia.Add(("assistant", resp));
+                    // Guarda solo los últimos 12 para no explotar tokens
+                    if (historia.Count > 12) historia.RemoveRange(0, historia.Count - 12);
+                    return resp;
+                }
                 Console.WriteLine($"GROQ VACIO {it.Modelo}, probando siguiente...");
             }
             catch (Exception ex)
