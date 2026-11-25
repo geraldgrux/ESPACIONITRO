@@ -271,7 +271,17 @@ public class Program
             {
                 datosVivos = await ObtenerNoticias(deduccion, new[] { deduccion, "Santiago Chile", "arquitectura Chile" }, 48, 3);
             }
-            string reglas = $"REGLAS: 1) Responde SOLO lo preguntado. 2) Todo en español chileno, PROHIBIDO inglés. 3) Texto plano, PROHIBIDO # * _ negritas, títulos en MAYUSCULAS, listas con guion -. 4) PROHIBIDO inventar datos. 5) PROHIBIDO decir fontanería, di instalaciones sanitarias. 6) Elabora tú la respuesta. 7) FLEXIBILIDAD TOTAL: entiende slang, faltas, 'eso', 'esa cuestión', 'y el otro?'. Deduce con la HISTORIA. 8) CONTINUIDAD: usa la historia. 9) PROHIBIDO decir 'NO PUEDO RESPONDER SIN MAS CONTEXTO' si hay historia. 10) FECHA: hoy es {DateTime.Now:dd/MM/yyyy}. Usa esa fecha, no inventes otra. Si te preguntan hoy, usa el pronóstico etiquetado HOY. Si te preguntan mañana, usa el etiquetado MANANA. ";
+            string reglasNormativa = "NORMATIVA CHILENA OBLIGATORIA, NO LA INVENTES: " +
+                "1) Quien aprueba es la DOM de la comuna, Direccion de Obras Municipales, segun LGUC y OGUC DS 47. " +
+                "2) El Colegio de Arquitectos NO aprueba planos, NO da permisos, NO revisa expedientes. Solo colegia y orienta. PROHIBIDO decir que el Colegio aprueba. " +
+                "3) El arquitecto es el profesional responsable y patrocinante del proyecto. " +
+                "4) Primer paso siempre: pedir el CIP, Certificado de Informaciones Previas, en la DOM de la comuna. No digas 'certificado de zonificacion' generico, di CIP. " +
+                "5) Luego se presenta el Permiso de Edificacion segun OGUC Art. 5.1.6, con planos de arquitectura, estructura, instalaciones sanitarias, electricidad, etc. " +
+                "6) Despues de construir, se pide la Recepcion Definitiva en la DOM. Sin recepcion no se puede habitar legalmente ni inscribir. " +
+                "7) Estudio de Impacto Ambiental EIA o DIA solo si el proyecto cae en el SEIA, Ley 19.300, por ejemplo loteos grandes, edificios grandes, proyectos en zona protegida. PROHIBIDO pedir EIA para una vivienda unifamiliar normal. " +
+                "8) Si no sabes el CIP especifico de ese terreno, di: 'Hay que pedir el CIP en la DOM de [comuna], ahi sale uso de suelo, rasante, distanciamiento, coeficiente'. No inventes valores de rasante ni distanciamiento. " +
+                "9) Si falta dato del terreno, marca [COMPLETAR: segun CIP] o 'Propuesta: ... a validar con CIP y DOM'. ";
+            string reglas = $"REGLAS: 1) Responde SOLO lo preguntado. 2) Todo en español chileno, PROHIBIDO inglés. 3) Texto plano, PROHIBIDO # * _ negritas, títulos en MAYUSCULAS, listas con guion -. 4) PROHIBIDO inventar datos. 5) PROHIBIDO decir fontanería, di instalaciones sanitarias. 6) Elabora tú la respuesta. 7) FLEXIBILIDAD TOTAL: entiende slang, faltas, 'eso', 'esa cuestión', 'y el otro?'. Deduce con la HISTORIA. 8) CONTINUIDAD: usa la historia. 9) PROHIBIDO decir 'NO PUEDO RESPONDER SIN MAS CONTEXTO' si hay historia. 10) FECHA: hoy es {DateTime.Now:dd/MM/yyyy}. Usa esa fecha, no inventes otra. Si te preguntan hoy, usa el pronóstico etiquetado HOY. Si te preguntan mañana, usa el etiquetado MANANA. " + reglasNormativa;
             string systemPrompt = reglas + $"DEDUCCION: {deduccion} | LUGAR: {ciudadFinal} | FUENTES: Deporte: {FUENTES_DEPORTE} | Clima: {FUENTES_CLIMA} | Norma: {FUENTES_NORMA} | Arq: {FUENTES_ARQ} ";
             if (!string.IsNullOrWhiteSpace(datosVivos)) systemPrompt += $"\nDATOS VIVOS REALES:\n{datosVivos}";
             else systemPrompt += "\nNo hay datos vivos, razona tú. Si falta dato del sitio, marca [COMPLETAR: según CIP] o 'Propuesta: ... a validar'.";
