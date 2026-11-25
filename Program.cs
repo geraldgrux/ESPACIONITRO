@@ -147,8 +147,10 @@ public class Program
             if (!encontrado) return "";
             var sb = new StringBuilder();
             sb.AppendLine($"FUENTES CLIMA: {FUENTES_CLIMA}");
-            sb.AppendLine($"CIUDAD: {ciudad} FECHA: {DateTime.Now:dd/MM/yyyy HH:mm}");
+            sb.AppendLine($"CIUDAD: {ciudad} FECHA HOY REAL: {DateTime.Now:dd/MM/yyyy HH:mm} America/Santiago");
             sb.AppendLine($"LUGAR REAL: {nombreReal}, {admin} lat {lat} lon {lon}");
+            sb.AppendLine($"HOY ES: {DateTime.Now:dd/MM/yyyy} - EL PRIMER PRONOSTICO DE LA LISTA ES HOY, EL SEGUNDO ES MANANA. NO LOS CONFUNDAS.");
+            sb.AppendLine($"SI EL USUARIO PREGUNTA 'COMO VA A ESTAR', RESPONDE CON EL PRONOSTICO DE HOY. SI PREGUNTA 'MANANA', USA EL SEGUNDO.");
             var fcUrl = $"https://api.open-meteo.com/v1/forecast?latitude={lat.ToString(CultureInfo.InvariantCulture)}&longitude={lon.ToString(CultureInfo.InvariantCulture)}&current=temperature_2m,precipitation,wind_speed_10m,wind_direction_10m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=America%2FSantiago&forecast_days=2";
             var fcJson = await client.GetStringAsync(fcUrl);
             using var d = JsonDocument.Parse(fcJson);
@@ -162,7 +164,8 @@ public class Program
             for (int i = 0; i < fechas.GetArrayLength(); i++)
             {
                 var probTxt = probs.ValueKind == JsonValueKind.Array && probs.GetArrayLength() > i && probs[i].ValueKind != JsonValueKind.Null ? $"{probs[i].GetInt32()}%" : "sin dato";
-                sb.AppendLine($"PRONOSTICO {fechas[i].GetString()}: máxima {maxs[i].GetDouble()}°C, mínima {mins[i].GetDouble()}°C, prob. lluvia {probTxt}.");
+                var etiqueta = i == 0 ? "HOY" : "MANANA";
+                sb.AppendLine($"PRONOSTICO {etiqueta} {fechas[i].GetString()}: máxima {maxs[i].GetDouble()}°C, mínima {mins[i].GetDouble()}°C, prob. lluvia {probTxt}.");
             }
             return sb.ToString();
         }
@@ -177,7 +180,7 @@ public class Program
             client.Timeout = TimeSpan.FromSeconds(8);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 EspacioNitroBot");
             var sb = new StringBuilder();
-            sb.AppendLine($"FECHA: {DateTime.Now:dd/MM/yyyy HH:mm} PREGUNTA: {pregunta}");
+            sb.AppendLine($"FECHA HOY REAL: {DateTime.Now:dd/MM/yyyy HH:mm} America/Santiago PREGUNTA: {pregunta}");
             foreach (var q in queries)
             {
                 try
@@ -268,7 +271,7 @@ public class Program
             {
                 datosVivos = await ObtenerNoticias(deduccion, new[] { deduccion, "Santiago Chile", "arquitectura Chile" }, 48, 3);
             }
-            string reglas = "REGLAS: 1) Responde SOLO lo preguntado. 2) Todo en español chileno, PROHIBIDO inglés. 3) Texto plano, PROHIBIDO # * _ negritas, títulos en MAYUSCULAS, listas con guion -. 4) PROHIBIDO inventar datos. 5) PROHIBIDO decir fontanería, di instalaciones sanitarias. 6) Elabora tú la respuesta. 7) FLEXIBILIDAD TOTAL: entiende slang, faltas, 'eso', 'esa cuestión', 'y el otro?'. Deduce con la HISTORIA. 8) CONTINUIDAD: usa la historia. 9) PROHIBIDO decir 'NO PUEDO RESPONDER SIN MAS CONTEXTO' si hay historia. ";
+            string reglas = $"REGLAS: 1) Responde SOLO lo preguntado. 2) Todo en español chileno, PROHIBIDO inglés. 3) Texto plano, PROHIBIDO # * _ negritas, títulos en MAYUSCULAS, listas con guion -. 4) PROHIBIDO inventar datos. 5) PROHIBIDO decir fontanería, di instalaciones sanitarias. 6) Elabora tú la respuesta. 7) FLEXIBILIDAD TOTAL: entiende slang, faltas, 'eso', 'esa cuestión', 'y el otro?'. Deduce con la HISTORIA. 8) CONTINUIDAD: usa la historia. 9) PROHIBIDO decir 'NO PUEDO RESPONDER SIN MAS CONTEXTO' si hay historia. 10) FECHA: hoy es {DateTime.Now:dd/MM/yyyy}. Usa esa fecha, no inventes otra. Si te preguntan hoy, usa el pronóstico etiquetado HOY. Si te preguntan mañana, usa el etiquetado MANANA. ";
             string systemPrompt = reglas + $"DEDUCCION: {deduccion} | LUGAR: {ciudadFinal} | FUENTES: Deporte: {FUENTES_DEPORTE} | Clima: {FUENTES_CLIMA} | Norma: {FUENTES_NORMA} | Arq: {FUENTES_ARQ} ";
             if (!string.IsNullOrWhiteSpace(datosVivos)) systemPrompt += $"\nDATOS VIVOS REALES:\n{datosVivos}";
             else systemPrompt += "\nNo hay datos vivos, razona tú. Si falta dato del sitio, marca [COMPLETAR: según CIP] o 'Propuesta: ... a validar'.";
